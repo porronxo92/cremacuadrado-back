@@ -1,0 +1,1 @@
+"""Cremacuadrado Backend Application."""
