@@ -30,9 +30,13 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-    # CORS — comma-separated list of allowed origins for production
-    # e.g. CORS_ORIGINS=["https://cremacuadrado.vercel.app"]
-    CORS_ORIGINS: list[str] = ["http://localhost:4200", "http://127.0.0.1:4200"]
+    # CORS — override via env var in production
+    # e.g. CORS_ORIGINS=["https://cremacuadrado-front.vercel.app"]
+    CORS_ORIGINS: list[str] = [
+        "https://cremacuadrado-front.vercel.app",
+        "http://localhost:4200",
+        "http://127.0.0.1:4200",
+    ]
 
     # Trusted hosts — set to your domain(s) in production to prevent Host header injection
     # e.g. ALLOWED_HOSTS=["cremacuadrado-back.vercel.app"]
