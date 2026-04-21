@@ -5,7 +5,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
@@ -43,8 +44,14 @@ app = FastAPI(
     description="API para el ecommerce de Cremacuadrado - Cremas de pistacho artesanales",
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
+    openapi_url="/openapi.json" if settings.DEBUG else None,
     lifespan=lifespan,
 )
+
+# Trusted Host middleware — prevents Host header injection
+# In production set ALLOWED_HOSTS=["cremacuadrado-back.vercel.app"] in env vars
+if settings.ALLOWED_HOSTS != ["*"]:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
 
 # CORS Middleware
 app.add_middleware(
@@ -54,6 +61,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security headers to every response."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    if not settings.DEBUG:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+    return response
 
 # Include API routers
 app.include_router(api_v1_router, prefix="/api/v1")
@@ -67,18 +88,10 @@ if static_path.exists():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "app": settings.APP_NAME,
-        "version": settings.APP_VERSION,
-    }
+    return {"status": "healthy"}
 
 
 @app.get("/")
 async def root():
     """Root endpoint."""
-    return {
-        "message": "Bienvenido a Cremacuadrado API",
-        "docs": "/docs",
-        "version": settings.APP_VERSION,
-    }
+    return {"message": "Bienvenido a Cremacuadrado API"}

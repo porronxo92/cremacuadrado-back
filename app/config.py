@@ -19,19 +19,24 @@ class Settings(BaseSettings):
     # Application
     APP_NAME: str = "Cremacuadrado API"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
-    
+    DEBUG: bool = False  # Never True in production
+
     # Database
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/cremacuadrado"
-    
+
     # JWT Authentication
     SECRET_KEY: str  # Required — set via .env, never hardcode
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-    
-    # CORS
+
+    # CORS — comma-separated list of allowed origins for production
+    # e.g. CORS_ORIGINS=["https://cremacuadrado.vercel.app"]
     CORS_ORIGINS: list[str] = ["http://localhost:4200", "http://127.0.0.1:4200"]
+
+    # Trusted hosts — set to your domain(s) in production to prevent Host header injection
+    # e.g. ALLOWED_HOSTS=["cremacuadrado-back.vercel.app"]
+    ALLOWED_HOSTS: list[str] = ["*"]
     
     # Shipping (MVP: fixed price)
     SHIPPING_COST: float = 4.95
@@ -51,6 +56,9 @@ class Settings(BaseSettings):
     # Admin
     ADMIN_EMAIL: str = "admin@cremacuadrado.com"
     ADMIN_PASSWORD: str  # Required — set via .env, never hardcode
+
+    # Security headers
+    SECURE_HEADERS: bool = True  # Set False only for local dev if needed
 
 
 @lru_cache
