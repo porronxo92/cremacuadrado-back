@@ -41,23 +41,25 @@ class Cart(Base):
 class CartItem(Base):
     """Cart item model."""
     __tablename__ = "cart_items"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     cart_id = Column(Integer, ForeignKey("carts.id", ondelete="CASCADE"), nullable=False)
     product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    product_variant_id = Column(Integer, ForeignKey("product_variants.id", ondelete="CASCADE"), nullable=False)
     quantity = Column(Integer, default=1, nullable=False)
     price_at_add = Column(Numeric(10, 2), nullable=False)  # Price when added to cart
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-    
+
     # Relationships
     cart = relationship("Cart", back_populates="items")
     product = relationship("Product", back_populates="cart_items")
-    
+    variant = relationship("ProductVariant", back_populates="cart_items")
+
     @property
     def total(self) -> Decimal:
         """Calculate item total."""
         return self.price_at_add * self.quantity
-    
+
     def __repr__(self):
-        return f"<CartItem {self.product_id} x{self.quantity}>"
+        return f"<CartItem variant={self.product_variant_id} x{self.quantity}>"

@@ -5,12 +5,12 @@ from decimal import Decimal
 from typing import Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Cookie, Response, status
+from fastapi import APIRouter, HTTPException, Cookie, Response, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import DbSession, CurrentUserOptional
 from app.models.cart import Cart, CartItem
-from app.models.product import Product
+from app.models.product import Product, ProductVariant
 from app.models.order import Coupon
 from app.models.user import User
 from app.schemas.cart import (
@@ -24,31 +24,20 @@ router = APIRouter()
 
 
 def set_cart_cookie(response: Response, session_id: str) -> None:
-    """Set cart session cookie with appropriate settings."""
-    # In development, use less restrictive settings for cross-origin requests
     response.set_cookie(
         key="cart_session",
         value=session_id,
         httponly=True,
-        max_age=60 * 60 * 24 * 30,  # 30 days
+        max_age=60 * 60 * 24 * 30,
         samesite="none" if settings.DEBUG else "lax",
-        secure=not settings.DEBUG,  # Secure only in production
+        secure=not settings.DEBUG,
     )
 
 
-def get_or_create_cart(
-    db: Session,
-    user: Optional[User] = None,
-    session_id: Optional[str] = None
-) -> Cart:
-    """Get existing cart or create a new one."""
+def get_or_create_cart(db: Session, user: Optional[User] = None, session_id: Optional[str] = None) -> Cart:
     cart = None
-    
     if user:
-        # Try to find user's cart
         cart = db.query(Cart).filter(Cart.user_id == user.id).first()
-        
-        # If user has a session cart, merge it
         if not cart and session_id:
             session_cart = db.query(Cart).filter(Cart.session_id == session_id).first()
             if session_cart:
@@ -58,7 +47,7 @@ def get_or_create_cart(
                 cart = session_cart
     elif session_id:
         cart = db.query(Cart).filter(Cart.session_id == session_id).first()
-    
+
     if not cart:
         cart = Cart(
             user_id=user.id if user else None,
@@ -67,52 +56,55 @@ def get_or_create_cart(
         db.add(cart)
         db.commit()
         db.refresh(cart)
-    
     return cart
 
 
 def calculate_shipping(subtotal: Decimal) -> tuple[Decimal, Optional[str]]:
-    """Calculate shipping cost and message."""
     threshold = Decimal(str(settings.FREE_SHIPPING_THRESHOLD))
     if subtotal >= threshold:
-        return Decimal('0'), "¡Envío gratis!"
-    else:
-        remaining = threshold - subtotal
-        message = f"Añade {remaining:.2f}€ más para envío gratis"
-        return Decimal(str(settings.SHIPPING_COST)), message
+        return Decimal('0'), "Envio gratis!"
+    remaining = threshold - subtotal
+    return Decimal(str(settings.SHIPPING_COST)), f"Añade {remaining:.2f}€ más para envío gratis"
+
+
+def _load_cart(db: Session, cart_id: int) -> Cart:
+    return db.query(Cart).options(
+        joinedload(Cart.items).joinedload(CartItem.variant).joinedload(ProductVariant.product).joinedload(Product.images),
+        joinedload(Cart.items).joinedload(CartItem.product).joinedload(Product.images),
+    ).filter(Cart.id == cart_id).first()
 
 
 def cart_to_response(cart: Cart, db: Session) -> CartResponse:
-    """Convert Cart model to CartResponse."""
     items = []
     subtotal = Decimal('0')
-    
+
     for item in cart.items:
+        variant = item.variant
         product = item.product
         item_total = item.price_at_add * item.quantity
         subtotal += item_total
-        
+
         items.append(CartItemResponse(
             id=item.id,
             product_id=product.id,
+            product_variant_id=variant.id,
             product_name=product.name,
             product_slug=product.slug,
+            variant_format=variant.format,
             product_image=product.primary_image,
-            product_price=product.price,
-            quantity=item.quantity,
+            unit_price=variant.price,
             price_at_add=item.price_at_add,
+            quantity=item.quantity,
             total=item_total,
-            is_available=product.is_in_stock and product.is_active,
-            stock_available=product.stock,
+            is_available=variant.is_in_stock and variant.is_active and product.is_active,
+            stock_available=variant.stock,
         ))
-    
-    # Calculate discount if coupon
+
     discount = Decimal('0')
     coupon_info = None
     if cart.coupon_code:
         coupon = db.query(Coupon).filter(
-            Coupon.code == cart.coupon_code,
-            Coupon.is_active == True
+            Coupon.code == cart.coupon_code, Coupon.is_active == True
         ).first()
         if coupon and coupon.is_valid:
             discount = coupon.calculate_discount(subtotal)
@@ -122,13 +114,9 @@ def cart_to_response(cart: Cart, db: Session) -> CartResponse:
                 discount_value=coupon.discount_value,
                 discount_amount=discount,
             )
-    
-    # Calculate shipping
-    subtotal_after_discount = subtotal - discount
-    shipping_cost, shipping_message = calculate_shipping(subtotal_after_discount)
-    
-    total = subtotal_after_discount + shipping_cost
-    
+
+    shipping_cost, shipping_message = calculate_shipping(subtotal - discount)
+
     return CartResponse(
         id=cart.id,
         item_count=sum(item.quantity for item in cart.items),
@@ -138,7 +126,7 @@ def cart_to_response(cart: Cart, db: Session) -> CartResponse:
         discount=discount,
         shipping_cost=shipping_cost,
         shipping_message=shipping_message,
-        total=total,
+        total=subtotal - discount + shipping_cost,
         updated_at=cart.updated_at,
     )
 
@@ -148,23 +136,15 @@ async def get_cart(
     db: DbSession,
     current_user: CurrentUserOptional,
     response: Response,
-    cart_session: Optional[str] = Cookie(None)
+    cart_session: Optional[str] = Cookie(None),
 ):
-    """Get current cart."""
-    # Generate session ID for guests
     session_id = cart_session
     if not current_user and not session_id:
         session_id = str(uuid.uuid4())
         set_cart_cookie(response, session_id)
 
     cart = get_or_create_cart(db, current_user, session_id)
-    
-    # Load relationships
-    cart = db.query(Cart).options(
-        joinedload(Cart.items).joinedload(CartItem.product).joinedload(Product.images)
-    ).filter(Cart.id == cart.id).first()
-    
-    return cart_to_response(cart, db)
+    return cart_to_response(_load_cart(db, cart.id), db)
 
 
 @router.post("/items", response_model=CartResponse, status_code=status.HTTP_201_CREATED)
@@ -173,81 +153,62 @@ async def add_to_cart(
     db: DbSession,
     current_user: CurrentUserOptional,
     response: Response,
-    cart_session: Optional[str] = Cookie(None)
+    cart_session: Optional[str] = Cookie(None),
 ):
-    """Add item to cart."""
-    # Generate session ID for guests
+    """Add a product variant to the cart."""
     session_id = cart_session
     if not current_user and not session_id:
         session_id = str(uuid.uuid4())
-        response.set_cookie(
-            key="cart_session",
-            value=session_id,
-            httponly=True,
-            max_age=60 * 60 * 24 * 30,
-            samesite="lax"
-        )
-    
-    # Get product
-    product = db.query(Product).filter(
-        Product.id == item_data.product_id,
-        Product.is_active == True
+        set_cart_cookie(response, session_id)
+
+    variant = db.query(ProductVariant).options(
+        joinedload(ProductVariant.product)
+    ).filter(
+        ProductVariant.id == item_data.product_variant_id,
+        ProductVariant.is_active == True,
     ).first()
-    
-    if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Producto no encontrado"
-        )
-    
-    if not product.is_in_stock:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Producto agotado"
-        )
-    
-    if item_data.quantity > product.stock:
+
+    if not variant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Variante no encontrada")
+
+    if not variant.product.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no disponible")
+
+    if not variant.is_in_stock:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Formato agotado")
+
+    if item_data.quantity > variant.stock:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Solo hay {product.stock} unidades disponibles"
+            detail=f"Solo hay {variant.stock} unidades disponibles"
         )
-    
-    # Get or create cart
+
     cart = get_or_create_cart(db, current_user, session_id)
-    
-    # Check if product already in cart
-    existing_item = db.query(CartItem).filter(
+
+    existing = db.query(CartItem).filter(
         CartItem.cart_id == cart.id,
-        CartItem.product_id == product.id
+        CartItem.product_variant_id == variant.id,
     ).first()
-    
-    if existing_item:
-        # Update quantity
-        new_quantity = existing_item.quantity + item_data.quantity
-        if new_quantity > product.stock:
+
+    if existing:
+        new_qty = existing.quantity + item_data.quantity
+        if new_qty > variant.stock:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Solo hay {product.stock} unidades disponibles"
+                detail=f"Solo hay {variant.stock} unidades disponibles"
             )
-        existing_item.quantity = new_quantity
+        existing.quantity = new_qty
     else:
-        # Add new item
-        cart_item = CartItem(
+        db.add(CartItem(
             cart_id=cart.id,
-            product_id=product.id,
+            product_id=variant.product_id,
+            product_variant_id=variant.id,
             quantity=item_data.quantity,
-            price_at_add=product.price,
-        )
-        db.add(cart_item)
-    
+            price_at_add=variant.price,
+        ))
+
     db.commit()
-    
-    # Reload cart with relationships
-    cart = db.query(Cart).options(
-        joinedload(Cart.items).joinedload(CartItem.product).joinedload(Product.images)
-    ).filter(Cart.id == cart.id).first()
-    
-    return cart_to_response(cart, db)
+    return cart_to_response(_load_cart(db, cart.id), db)
 
 
 @router.put("/items/{item_id}", response_model=CartResponse)
@@ -256,38 +217,27 @@ async def update_cart_item(
     item_data: CartItemUpdate,
     db: DbSession,
     current_user: CurrentUserOptional,
-    cart_session: Optional[str] = Cookie(None)
+    cart_session: Optional[str] = Cookie(None),
 ):
-    """Update cart item quantity."""
     cart = get_or_create_cart(db, current_user, cart_session)
-    
-    cart_item = db.query(CartItem).filter(
-        CartItem.id == item_id,
-        CartItem.cart_id == cart.id
+    cart_item = db.query(CartItem).options(
+        joinedload(CartItem.variant)
+    ).filter(
+        CartItem.id == item_id, CartItem.cart_id == cart.id
     ).first()
-    
+
     if not cart_item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Item no encontrado en el carrito"
-        )
-    
-    # Check stock
-    if item_data.quantity > cart_item.product.stock:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item no encontrado en el carrito")
+
+    if item_data.quantity > cart_item.variant.stock:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Solo hay {cart_item.product.stock} unidades disponibles"
+            detail=f"Solo hay {cart_item.variant.stock} unidades disponibles"
         )
-    
+
     cart_item.quantity = item_data.quantity
     db.commit()
-    
-    # Reload cart
-    cart = db.query(Cart).options(
-        joinedload(Cart.items).joinedload(CartItem.product).joinedload(Product.images)
-    ).filter(Cart.id == cart.id).first()
-    
-    return cart_to_response(cart, db)
+    return cart_to_response(_load_cart(db, cart.id), db)
 
 
 @router.delete("/items/{item_id}", response_model=CartResponse)
@@ -295,46 +245,31 @@ async def remove_cart_item(
     item_id: int,
     db: DbSession,
     current_user: CurrentUserOptional,
-    cart_session: Optional[str] = Cookie(None)
+    cart_session: Optional[str] = Cookie(None),
 ):
-    """Remove item from cart."""
     cart = get_or_create_cart(db, current_user, cart_session)
-    
     cart_item = db.query(CartItem).filter(
-        CartItem.id == item_id,
-        CartItem.cart_id == cart.id
+        CartItem.id == item_id, CartItem.cart_id == cart.id
     ).first()
-    
+
     if not cart_item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Item no encontrado en el carrito"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item no encontrado en el carrito")
+
     db.delete(cart_item)
     db.commit()
-    
-    # Reload cart
-    cart = db.query(Cart).options(
-        joinedload(Cart.items).joinedload(CartItem.product).joinedload(Product.images)
-    ).filter(Cart.id == cart.id).first()
-    
-    return cart_to_response(cart, db)
+    return cart_to_response(_load_cart(db, cart.id), db)
 
 
 @router.delete("", response_model=Message)
 async def clear_cart(
     db: DbSession,
     current_user: CurrentUserOptional,
-    cart_session: Optional[str] = Cookie(None)
+    cart_session: Optional[str] = Cookie(None),
 ):
-    """Clear all items from cart."""
     cart = get_or_create_cart(db, current_user, cart_session)
-    
     db.query(CartItem).filter(CartItem.cart_id == cart.id).delete()
     cart.coupon_code = None
     db.commit()
-    
     return Message(message="Carrito vaciado")
 
 
@@ -343,45 +278,26 @@ async def apply_coupon(
     coupon_data: ApplyCoupon,
     db: DbSession,
     current_user: CurrentUserOptional,
-    cart_session: Optional[str] = Cookie(None)
+    cart_session: Optional[str] = Cookie(None),
 ):
-    """Apply coupon to cart."""
     cart = get_or_create_cart(db, current_user, cart_session)
-    
-    # Load cart items
-    cart = db.query(Cart).options(
-        joinedload(Cart.items).joinedload(CartItem.product).joinedload(Product.images)
-    ).filter(Cart.id == cart.id).first()
-    
-    # Find coupon
-    coupon = db.query(Coupon).filter(
-        Coupon.code == coupon_data.code.upper()
-    ).first()
-    
+    cart = _load_cart(db, cart.id)
+
+    coupon = db.query(Coupon).filter(Coupon.code == coupon_data.code.upper()).first()
     if not coupon:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Cupón no encontrado"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cupon no encontrado")
     if not coupon.is_valid:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cupón no válido o expirado"
-        )
-    
-    # Check minimum order
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cupon no valido o expirado")
+
     subtotal = cart.subtotal
     if subtotal < coupon.min_order_amount:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"El pedido mínimo para este cupón es {coupon.min_order_amount}€"
+            detail=f"El pedido minimo para este cupon es {coupon.min_order_amount}€"
         )
-    
-    # Apply coupon
+
     cart.coupon_code = coupon.code
     db.commit()
-    
     return cart_to_response(cart, db)
 
 
@@ -389,17 +305,9 @@ async def apply_coupon(
 async def remove_coupon(
     db: DbSession,
     current_user: CurrentUserOptional,
-    cart_session: Optional[str] = Cookie(None)
+    cart_session: Optional[str] = Cookie(None),
 ):
-    """Remove coupon from cart."""
     cart = get_or_create_cart(db, current_user, cart_session)
-    
     cart.coupon_code = None
     db.commit()
-    
-    # Reload cart
-    cart = db.query(Cart).options(
-        joinedload(Cart.items).joinedload(CartItem.product).joinedload(Product.images)
-    ).filter(Cart.id == cart.id).first()
-    
-    return cart_to_response(cart, db)
+    return cart_to_response(_load_cart(db, cart.id), db)

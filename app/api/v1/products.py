@@ -2,18 +2,16 @@
 Products API endpoints.
 """
 from typing import Optional, List
-from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_, func
 
 from app.api.deps import DbSession, CurrentUser, CurrentUserOptional
-from app.models.product import Product, Category, Review
+from app.models.product import Product, ProductVariant, Category, Review
 from app.models.order import OrderItem
 from app.schemas.product import (
-    ProductResponse, ProductListResponse, CategoryResponse,
-    ReviewCreate, ReviewResponse
+    ProductResponse, ProductListResponse, ProductVariantResponse,
+    CategoryResponse, ReviewCreate, ReviewResponse
 )
 from app.schemas.common import PaginatedResponse
 from app.config import settings
@@ -21,23 +19,46 @@ from app.config import settings
 router = APIRouter()
 
 
-def product_to_list_response(product: Product) -> ProductListResponse:
-    """Convert Product model to ProductListResponse."""
+def _variant_response(v: ProductVariant) -> ProductVariantResponse:
+    return ProductVariantResponse(
+        id=v.id,
+        sku=v.sku,
+        format=v.format,
+        weight_grams=v.weight_grams,
+        price=v.price,
+        compare_price=v.compare_price,
+        stock=v.stock,
+        is_active=v.is_active,
+        is_in_stock=v.is_in_stock,
+        is_low_stock=v.is_low_stock,
+        sort_order=v.sort_order,
+    )
+
+
+def _product_to_list_response(product: Product) -> ProductListResponse:
     return ProductListResponse(
         id=product.id,
         sku=product.sku,
         slug=product.slug,
         name=product.name,
         short_description=product.short_description,
-        price=product.price,
-        compare_price=product.compare_price,
+        badge_color=product.badge_color,
         is_in_stock=product.is_in_stock,
-        is_low_stock=product.is_low_stock,
         is_featured=product.is_featured,
         primary_image=product.primary_image,
         category_slug=product.category.slug if product.category else None,
+        variants=[_variant_response(v) for v in product.variants if v.is_active],
         average_rating=product.average_rating,
         review_count=product.review_count,
+    )
+
+
+def _load_product_query(db: Session):
+    return db.query(Product).options(
+        joinedload(Product.variants),
+        joinedload(Product.images),
+        joinedload(Product.category),
+        joinedload(Product.reviews),
     )
 
 
@@ -48,109 +69,65 @@ async def list_products(
     page_size: int = Query(settings.DEFAULT_PAGE_SIZE, ge=1, le=settings.MAX_PAGE_SIZE),
     category: Optional[str] = None,
     search: Optional[str] = None,
-    min_price: Optional[Decimal] = None,
-    max_price: Optional[Decimal] = None,
     in_stock: Optional[bool] = None,
     featured: Optional[bool] = None,
-    sort_by: str = Query("created_at", pattern="^(name|price|created_at)$"),
+    sort_by: str = Query("created_at", pattern="^(name|created_at)$"),
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
 ):
-    """
-    List products with filters and pagination.
-    
-    Filters:
-    - category: Filter by category slug
-    - search: Search in name and description
-    - min_price/max_price: Price range
-    - in_stock: Only products in stock
-    - featured: Only featured products
-    """
-    query = db.query(Product).options(
-        joinedload(Product.images),
-        joinedload(Product.category),
-        joinedload(Product.reviews),
-    ).filter(Product.is_active == True)
-    
-    # Category filter
+    """List products with their variants. Two products: Pura and Crunchy."""
+    query = _load_product_query(db).filter(Product.is_active == True)
+
     if category:
         query = query.join(Category).filter(Category.slug == category)
-    
-    # Search filter
+
     if search:
-        search_term = f"%{search}%"
+        term = f"%{search}%"
         query = query.filter(
-            or_(
-                Product.name.ilike(search_term),
-                Product.short_description.ilike(search_term),
-                Product.description.ilike(search_term),
-            )
+            Product.name.ilike(term) | Product.short_description.ilike(term)
         )
-    
-    # Price filters
-    if min_price is not None:
-        query = query.filter(Product.price >= min_price)
-    if max_price is not None:
-        query = query.filter(Product.price <= max_price)
-    
-    # Stock filter
-    if in_stock is True:
-        query = query.filter(Product.stock > 0)
-    
-    # Featured filter
+
     if featured is True:
         query = query.filter(Product.is_featured == True)
-    
-    # Sorting
-    sort_column = getattr(Product, sort_by)
-    if sort_order == "desc":
-        sort_column = sort_column.desc()
-    query = query.order_by(sort_column)
-    
-    # Count total
+
+    sort_col = getattr(Product, sort_by)
+    query = query.order_by(sort_col.desc() if sort_order == "desc" else sort_col)
+
     total = query.count()
-    
-    # Paginate
-    offset = (page - 1) * page_size
-    products = query.offset(offset).limit(page_size).all()
-    
-    # Convert to response
-    items = [product_to_list_response(p) for p in products]
-    
-    return PaginatedResponse.create(items, total, page, page_size)
+    products = query.offset((page - 1) * page_size).limit(page_size).all()
+
+    if in_stock is True:
+        products = [p for p in products if p.is_in_stock]
+        total = len(products)
+
+    return PaginatedResponse.create(
+        [_product_to_list_response(p) for p in products], total, page, page_size
+    )
 
 
 @router.get("/categories", response_model=List[CategoryResponse])
 async def list_categories(db: DbSession, include_empty: bool = False):
-    """List all active product categories."""
+    """List active product categories."""
     query = db.query(Category).filter(Category.is_active == True)
-    
     if not include_empty:
-        # Only categories with products
         query = query.join(Product).filter(Product.is_active == True).distinct()
-    
-    categories = query.order_by(Category.sort_order, Category.name).all()
-    return categories
+    return query.order_by(Category.sort_order, Category.name).all()
 
 
 @router.get("/featured", response_model=List[ProductListResponse])
 async def list_featured_products(db: DbSession, limit: int = Query(4, ge=1, le=10)):
     """Get featured products for homepage."""
-    products = db.query(Product).options(
-        joinedload(Product.images),
-        joinedload(Product.category),
-        joinedload(Product.reviews),
-    ).filter(
+    products = _load_product_query(db).filter(
         Product.is_active == True,
         Product.is_featured == True,
     ).limit(limit).all()
-    
-    return [product_to_list_response(p) for p in products]
+    return [_product_to_list_response(p) for p in products]
 
 
 @router.get("/{slug}", response_model=ProductResponse)
 async def get_product(slug: str, db: DbSession):
-    """Get product details by slug."""
+    """Get full product detail including all variants."""
     product = db.query(Product).options(
+        joinedload(Product.variants),
         joinedload(Product.images),
         joinedload(Product.category),
         joinedload(Product.nutrition),
@@ -159,13 +136,10 @@ async def get_product(slug: str, db: DbSession):
         Product.slug == slug,
         Product.is_active == True,
     ).first()
-    
+
     if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Producto no encontrado"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado")
+
     return ProductResponse(
         id=product.id,
         sku=product.sku,
@@ -173,17 +147,14 @@ async def get_product(slug: str, db: DbSession):
         name=product.name,
         short_description=product.short_description,
         description=product.description,
-        price=product.price,
-        compare_price=product.compare_price,
-        stock=product.stock,
-        weight=product.weight,
+        badge_color=product.badge_color,
         is_active=product.is_active,
         is_featured=product.is_featured,
         is_in_stock=product.is_in_stock,
-        is_low_stock=product.is_low_stock,
         category=product.category,
         images=product.images,
         nutrition=product.nutrition,
+        variants=[_variant_response(v) for v in product.variants if v.is_active],
         average_rating=product.average_rating,
         review_count=product.review_count,
         created_at=product.created_at,
@@ -196,18 +167,15 @@ async def get_product_reviews(slug: str, db: DbSession):
     """Get approved reviews for a product."""
     product = db.query(Product).filter(Product.slug == slug).first()
     if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Producto no encontrado"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado")
+
     reviews = db.query(Review).options(
         joinedload(Review.user)
     ).filter(
         Review.product_id == product.id,
         Review.status == "approved"
     ).order_by(Review.created_at.desc()).all()
-    
+
     return [
         ReviewResponse(
             id=r.id,
@@ -225,40 +193,25 @@ async def get_product_reviews(slug: str, db: DbSession):
 
 
 @router.post("/{slug}/reviews", response_model=ReviewResponse, status_code=status.HTTP_201_CREATED)
-async def create_review(
-    slug: str,
-    review_data: ReviewCreate,
-    db: DbSession,
-    current_user: CurrentUser
-):
+async def create_review(slug: str, review_data: ReviewCreate, db: DbSession, current_user: CurrentUser):
     """Create a review for a product (authenticated users only)."""
     product = db.query(Product).filter(Product.slug == slug).first()
     if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Producto no encontrado"
-        )
-    
-    # Check if user already reviewed this product
-    existing_review = db.query(Review).filter(
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado")
+
+    existing = db.query(Review).filter(
         Review.product_id == product.id,
         Review.user_id == current_user.id
     ).first()
-    
-    if existing_review:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Ya has dejado una reseña para este producto"
-        )
-    
-    # Check if user has purchased this product
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ya has dejado una reseña para este producto")
+
     has_purchased = db.query(OrderItem).join(OrderItem.order).filter(
         OrderItem.product_id == product.id,
         OrderItem.order.has(user_id=current_user.id),
         OrderItem.order.has(status="delivered")
     ).first() is not None
-    
-    # Create review
+
     review = Review(
         product_id=product.id,
         user_id=current_user.id,
@@ -266,13 +219,12 @@ async def create_review(
         title=review_data.title,
         comment=review_data.comment,
         is_verified_purchase=has_purchased,
-        status="pending",  # Reviews need approval
+        status="pending",
     )
-    
     db.add(review)
     db.commit()
     db.refresh(review)
-    
+
     return ReviewResponse(
         id=review.id,
         rating=review.rating,

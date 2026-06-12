@@ -108,25 +108,27 @@ class Order(Base):
 class OrderItem(Base):
     """Order item model."""
     __tablename__ = "order_items"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False)
     product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
-    
+    product_variant_id = Column(Integer, ForeignKey("product_variants.id", ondelete="SET NULL"), nullable=True)
+
     # Snapshot of product at time of order
     product_name = Column(String(200), nullable=False)
     product_sku = Column(String(50), nullable=True)
     product_image_url = Column(String(500), nullable=True)
-    
+
     # Pricing
     quantity = Column(Integer, nullable=False)
     unit_price = Column(Numeric(10, 2), nullable=False)
     total = Column(Numeric(10, 2), nullable=False)
-    
+
     # Relationships
     order = relationship("Order", back_populates="items")
     product = relationship("Product", back_populates="order_items")
-    
+    variant = relationship("ProductVariant", back_populates="order_items")
+
     def __repr__(self):
         return f"<OrderItem {self.product_name} x{self.quantity}>"
 

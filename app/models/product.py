@@ -1,5 +1,5 @@
 """
-Product models - Categories, Products, Images, Nutrition, Reviews.
+Product models - Categories, Products, ProductVariants, Images, Nutrition, Reviews.
 """
 from datetime import datetime
 from decimal import Decimal
@@ -32,21 +32,23 @@ class Category(Base):
 
 
 class Product(Base):
-    """Product model."""
+    """Product model — master product (e.g. Crema Pura, Crema Crunchy)."""
     __tablename__ = "products"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     sku = Column(String(50), unique=True, nullable=True, index=True)
     slug = Column(String(200), unique=True, nullable=False, index=True)
     name = Column(String(200), nullable=False)
     short_description = Column(Text, nullable=True)
     description = Column(Text, nullable=True)
-    price = Column(Numeric(10, 2), nullable=False)
-    compare_price = Column(Numeric(10, 2), nullable=True)  # Original price for discounts
-    cost = Column(Numeric(10, 2), nullable=True)  # Cost price
-    stock = Column(Integer, default=0, nullable=False)
+    badge_color = Column(String(20), nullable=True)  # e.g. #F5A542 (Crunchy), #A2BA1C (Pura)
+    # price/stock/weight live on ProductVariant — kept nullable for legacy compat
+    price = Column(Numeric(10, 2), nullable=True)
+    compare_price = Column(Numeric(10, 2), nullable=True)
+    cost = Column(Numeric(10, 2), nullable=True)
+    stock = Column(Integer, default=0, nullable=True)
     low_stock_threshold = Column(Integer, default=5, nullable=False)
-    weight = Column(Integer, nullable=True)  # Weight in grams
+    weight = Column(Integer, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     is_featured = Column(Boolean, default=False, nullable=False)
     category_id = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True)
@@ -54,54 +56,85 @@ class Product(Base):
     meta_description = Column(String(500), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-    
-    # Constraints
-    __table_args__ = (
-        CheckConstraint('price >= 0', name='check_price_positive'),
-        CheckConstraint('stock >= 0', name='check_stock_positive'),
-    )
-    
+
     # Relationships
     category = relationship("Category", back_populates="products")
+    variants = relationship("ProductVariant", back_populates="product", cascade="all, delete-orphan", order_by="ProductVariant.sort_order")
     images = relationship("ProductImage", back_populates="product", cascade="all, delete-orphan", order_by="ProductImage.sort_order")
     nutrition = relationship("ProductNutrition", back_populates="product", uselist=False, cascade="all, delete-orphan")
     reviews = relationship("Review", back_populates="product", cascade="all, delete-orphan")
     cart_items = relationship("CartItem", back_populates="product")
     order_items = relationship("OrderItem", back_populates="product")
-    
+
     @property
     def primary_image(self) -> str | None:
-        """Get primary image URL."""
         for img in self.images:
             if img.is_primary:
                 return img.url
         return self.images[0].url if self.images else None
-    
+
     @property
     def is_in_stock(self) -> bool:
-        """Check if product is in stock."""
-        return self.stock > 0
-    
+        return any(v.is_in_stock for v in self.variants if v.is_active)
+
     @property
-    def is_low_stock(self) -> bool:
-        """Check if product has low stock."""
-        return 0 < self.stock <= self.low_stock_threshold
-    
+    def min_price(self) -> Decimal | None:
+        active = [v.price for v in self.variants if v.is_active]
+        return min(active) if active else None
+
     @property
     def average_rating(self) -> float | None:
-        """Calculate average rating from approved reviews."""
-        approved_reviews = [r for r in self.reviews if r.status == "approved"]
-        if not approved_reviews:
+        approved = [r for r in self.reviews if r.status == "approved"]
+        if not approved:
             return None
-        return sum(r.rating for r in approved_reviews) / len(approved_reviews)
-    
+        return sum(r.rating for r in approved) / len(approved)
+
     @property
     def review_count(self) -> int:
-        """Count approved reviews."""
         return len([r for r in self.reviews if r.status == "approved"])
-    
+
     def __repr__(self):
         return f"<Product {self.name}>"
+
+
+class ProductVariant(Base):
+    """Product variant — one per format (100g, 200g, 1kg)."""
+    __tablename__ = "product_variants"
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    sku = Column(String(50), unique=True, nullable=True, index=True)
+    format = Column(String(20), nullable=False)  # '100g', '200g', '1kg'
+    weight_grams = Column(Integer, nullable=False)
+    price = Column(Numeric(10, 2), nullable=False)
+    compare_price = Column(Numeric(10, 2), nullable=True)
+    stock = Column(Integer, default=0, nullable=False)
+    low_stock_threshold = Column(Integer, default=5, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint('price >= 0', name='check_variant_price_positive'),
+        CheckConstraint('stock >= 0', name='check_variant_stock_positive'),
+    )
+
+    # Relationships
+    product = relationship("Product", back_populates="variants")
+    cart_items = relationship("CartItem", back_populates="variant")
+    order_items = relationship("OrderItem", back_populates="variant")
+
+    @property
+    def is_in_stock(self) -> bool:
+        return self.stock > 0
+
+    @property
+    def is_low_stock(self) -> bool:
+        return 0 < self.stock <= self.low_stock_threshold
+
+    def __repr__(self):
+        return f"<ProductVariant {self.sku} {self.format}>"
 
 
 class ProductImage(Base):

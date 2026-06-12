@@ -14,16 +14,48 @@ from sqlalchemy import func, and_
 
 from app.api.deps import DbSession, AdminUser
 from app.models.user import User
-from app.models.product import Product, Category, Review
+from app.models.product import Product, Category, Review, ProductVariant
 from app.models.order import Order, OrderItem
 from app.schemas.order import OrderResponse, OrderStatusUpdate
-from app.schemas.product import ProductCreate, ProductUpdate, ProductResponse
+from app.schemas.product import ProductResponse, ProductVariantResponse
 from app.schemas.admin import DashboardStats
 from app.schemas.common import Message, PaginatedResponse
 from app.services.email import EmailService
 from app.config import settings
 
 router = APIRouter()
+
+
+def _variant_resp(v: ProductVariant) -> ProductVariantResponse:
+    return ProductVariantResponse(
+        id=v.id, sku=v.sku, format=v.format, weight_grams=v.weight_grams,
+        price=v.price, compare_price=v.compare_price, stock=v.stock,
+        is_active=v.is_active, is_in_stock=v.is_in_stock, is_low_stock=v.is_low_stock,
+        sort_order=v.sort_order,
+    )
+
+
+def _product_response(product: Product) -> ProductResponse:
+    return ProductResponse(
+        id=product.id,
+        sku=product.sku,
+        slug=product.slug,
+        name=product.name,
+        short_description=product.short_description,
+        description=product.description,
+        badge_color=product.badge_color,
+        is_active=product.is_active,
+        is_featured=product.is_featured,
+        is_in_stock=product.is_in_stock,
+        category=product.category,
+        images=product.images,
+        nutrition=product.nutrition,
+        variants=[_variant_resp(v) for v in product.variants],
+        average_rating=product.average_rating,
+        review_count=product.review_count,
+        created_at=product.created_at,
+        updated_at=product.updated_at,
+    )
 
 
 # =============================================================================
@@ -408,179 +440,93 @@ async def list_products_admin(
 ):
     """List all products (admin)."""
     query = db.query(Product).options(
+        joinedload(Product.variants),
         joinedload(Product.images),
         joinedload(Product.category),
         joinedload(Product.nutrition),
         joinedload(Product.reviews),
     )
-    
+
     if not include_inactive:
         query = query.filter(Product.is_active == True)
-    
+
     if search:
         query = query.filter(
             Product.name.ilike(f"%{search}%") |
             Product.sku.ilike(f"%{search}%")
         )
-    
+
     if category:
         query = query.join(Category).filter(Category.slug == category)
-    
+
     query = query.order_by(Product.created_at.desc())
-    
+
     total = query.count()
     offset = (page - 1) * page_size
     products = query.offset(offset).limit(page_size).all()
-    
-    items = [
-        ProductResponse(
-            id=p.id,
-            sku=p.sku,
-            slug=p.slug,
-            name=p.name,
-            short_description=p.short_description,
-            description=p.description,
-            price=p.price,
-            compare_price=p.compare_price,
-            stock=p.stock,
-            weight=p.weight,
-            is_active=p.is_active,
-            is_featured=p.is_featured,
-            is_in_stock=p.is_in_stock,
-            is_low_stock=p.is_low_stock,
-            category=p.category,
-            images=p.images,
-            nutrition=p.nutrition,
-            average_rating=p.average_rating,
-            review_count=p.review_count,
-            created_at=p.created_at,
-            updated_at=p.updated_at,
-        )
-        for p in products
-    ]
-    
+
+    items = [_product_response(p) for p in products]
+
     return PaginatedResponse.create(items, total, page, page_size)
 
 
 @router.post("/products", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
 async def create_product(
-    product_data: ProductCreate,
+    product_data: dict,
     db: DbSession,
     admin_user: AdminUser
 ):
-    """Create a new product (admin)."""
-    # Check slug uniqueness
-    existing = db.query(Product).filter(Product.slug == product_data.slug).first()
+    """Create a new product (admin). Variants are managed separately."""
+    existing = db.query(Product).filter(Product.slug == product_data.get("slug")).first()
     if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Ya existe un producto con este slug"
-        )
-    
-    product = Product(**product_data.model_dump())
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ya existe un producto con este slug")
+
+    allowed = {"sku", "slug", "name", "short_description", "description", "badge_color",
+               "is_active", "is_featured", "category_id", "meta_title", "meta_description"}
+    product = Product(**{k: v for k, v in product_data.items() if k in allowed})
     db.add(product)
     db.commit()
     db.refresh(product)
-    
-    # Reload with relationships
+
     product = db.query(Product).options(
-        joinedload(Product.images),
-        joinedload(Product.category),
-        joinedload(Product.nutrition),
-        joinedload(Product.reviews),
+        joinedload(Product.variants), joinedload(Product.images),
+        joinedload(Product.category), joinedload(Product.nutrition), joinedload(Product.reviews),
     ).filter(Product.id == product.id).first()
-    
-    return ProductResponse(
-        id=product.id,
-        sku=product.sku,
-        slug=product.slug,
-        name=product.name,
-        short_description=product.short_description,
-        description=product.description,
-        price=product.price,
-        compare_price=product.compare_price,
-        stock=product.stock,
-        weight=product.weight,
-        is_active=product.is_active,
-        is_featured=product.is_featured,
-        is_in_stock=product.is_in_stock,
-        is_low_stock=product.is_low_stock,
-        category=product.category,
-        images=product.images,
-        nutrition=product.nutrition,
-        average_rating=product.average_rating,
-        review_count=product.review_count,
-        created_at=product.created_at,
-        updated_at=product.updated_at,
-    )
+
+    return _product_response(product)
 
 
 @router.put("/products/{product_id}", response_model=ProductResponse)
 async def update_product(
     product_id: int,
-    product_data: ProductUpdate,
+    product_data: dict,
     db: DbSession,
     admin_user: AdminUser
 ):
     """Update a product (admin)."""
     product = db.query(Product).filter(Product.id == product_id).first()
-    
     if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Producto no encontrado"
-        )
-    
-    # Check slug uniqueness if changing
-    if product_data.slug and product_data.slug != product.slug:
-        existing = db.query(Product).filter(
-            Product.slug == product_data.slug,
-            Product.id != product_id
-        ).first()
-        if existing:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Ya existe un producto con este slug"
-            )
-    
-    update_data = product_data.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(product, field, value)
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado")
+
+    if "slug" in product_data and product_data["slug"] != product.slug:
+        if db.query(Product).filter(Product.slug == product_data["slug"], Product.id != product_id).first():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ya existe un producto con este slug")
+
+    allowed = {"sku", "slug", "name", "short_description", "description", "badge_color",
+               "is_active", "is_featured", "category_id", "meta_title", "meta_description"}
+    for field, value in product_data.items():
+        if field in allowed:
+            setattr(product, field, value)
+
     db.commit()
     db.refresh(product)
-    
-    # Reload with relationships
+
     product = db.query(Product).options(
-        joinedload(Product.images),
-        joinedload(Product.category),
-        joinedload(Product.nutrition),
-        joinedload(Product.reviews),
+        joinedload(Product.variants), joinedload(Product.images),
+        joinedload(Product.category), joinedload(Product.nutrition), joinedload(Product.reviews),
     ).filter(Product.id == product.id).first()
-    
-    return ProductResponse(
-        id=product.id,
-        sku=product.sku,
-        slug=product.slug,
-        name=product.name,
-        short_description=product.short_description,
-        description=product.description,
-        price=product.price,
-        compare_price=product.compare_price,
-        stock=product.stock,
-        weight=product.weight,
-        is_active=product.is_active,
-        is_featured=product.is_featured,
-        is_in_stock=product.is_in_stock,
-        is_low_stock=product.is_low_stock,
-        category=product.category,
-        images=product.images,
-        nutrition=product.nutrition,
-        average_rating=product.average_rating,
-        review_count=product.review_count,
-        created_at=product.created_at,
-        updated_at=product.updated_at,
-    )
+
+    return _product_response(product)
 
 
 @router.delete("/products/{product_id}", response_model=Message)
