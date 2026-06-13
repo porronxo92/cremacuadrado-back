@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Optional
 import uuid
 
-from fastapi import APIRouter, HTTPException, Cookie, Response, status
+from fastapi import APIRouter, HTTPException, Cookie, Header, Response, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import DbSession, CurrentUserOptional
@@ -138,7 +138,7 @@ async def get_cart(
     current_user: CurrentUserOptional,
     response: Response,
     cart_session: Optional[str] = Cookie(None),
-    x_cart_session: Optional[str] = None,
+    x_cart_session: Optional[str] = Header(None, alias="X-Cart-Session"),
 ):
     # Accept cart_session from both cookie and header (for cross-domain scenarios)
     session_id = cart_session or x_cart_session
@@ -158,7 +158,7 @@ async def add_to_cart(
     current_user: CurrentUserOptional,
     response: Response,
     cart_session: Optional[str] = Cookie(None),
-    x_cart_session: Optional[str] = None,
+    x_cart_session: Optional[str] = Header(None, alias="X-Cart-Session"),
 ):
     """Add a product variant to the cart."""
     # Accept cart_session from both cookie and header
@@ -225,7 +225,7 @@ async def update_cart_item(
     db: DbSession,
     current_user: CurrentUserOptional,
     cart_session: Optional[str] = Cookie(None),
-    x_cart_session: Optional[str] = None,
+    x_cart_session: Optional[str] = Header(None, alias="X-Cart-Session"),
 ):
     session_id = cart_session or x_cart_session
     cart = get_or_create_cart(db, current_user, session_id)
@@ -255,7 +255,7 @@ async def remove_cart_item(
     db: DbSession,
     current_user: CurrentUserOptional,
     cart_session: Optional[str] = Cookie(None),
-    x_cart_session: Optional[str] = None,
+    x_cart_session: Optional[str] = Header(None, alias="X-Cart-Session"),
 ):
     session_id = cart_session or x_cart_session
     cart = get_or_create_cart(db, current_user, session_id)
@@ -276,7 +276,7 @@ async def clear_cart(
     db: DbSession,
     current_user: CurrentUserOptional,
     cart_session: Optional[str] = Cookie(None),
-    x_cart_session: Optional[str] = None,
+    x_cart_session: Optional[str] = Header(None, alias="X-Cart-Session"),
 ):
     session_id = cart_session or x_cart_session
     cart = get_or_create_cart(db, current_user, session_id)
@@ -292,7 +292,7 @@ async def apply_coupon(
     db: DbSession,
     current_user: CurrentUserOptional,
     cart_session: Optional[str] = Cookie(None),
-    x_cart_session: Optional[str] = None,
+    x_cart_session: Optional[str] = Header(None, alias="X-Cart-Session"),
 ):
     session_id = cart_session or x_cart_session
     cart = get_or_create_cart(db, current_user, session_id)
@@ -321,7 +321,7 @@ async def remove_coupon(
     db: DbSession,
     current_user: CurrentUserOptional,
     cart_session: Optional[str] = Cookie(None),
-    x_cart_session: Optional[str] = None,
+    x_cart_session: Optional[str] = Header(None, alias="X-Cart-Session"),
 ):
     session_id = cart_session or x_cart_session
     cart = get_or_create_cart(db, current_user, session_id)
