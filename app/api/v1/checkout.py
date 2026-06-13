@@ -28,15 +28,17 @@ router = APIRouter()
 async def get_shipping_cost(
     db: DbSession,
     current_user: CurrentUserOptional,
-    cart_session: Optional[str] = Cookie(None)
+    cart_session: Optional[str] = Cookie(None),
+    x_cart_session: Optional[str] = None,
 ):
     """Calculate shipping cost for current cart."""
+    session_id = cart_session or x_cart_session
     # Get cart
     cart = None
     if current_user:
         cart = db.query(Cart).filter(Cart.user_id == current_user.id).first()
-    elif cart_session:
-        cart = db.query(Cart).filter(Cart.session_id == cart_session).first()
+    elif session_id:
+        cart = db.query(Cart).filter(Cart.session_id == session_id).first()
     
     if not cart:
         subtotal = Decimal('0')
@@ -80,17 +82,19 @@ async def validate_checkout(
     checkout_data: CheckoutCreate,
     db: DbSession,
     current_user: CurrentUserOptional,
-    cart_session: Optional[str] = Cookie(None)
+    cart_session: Optional[str] = Cookie(None),
+    x_cart_session: Optional[str] = None,
 ):
     """Validate cart and checkout data before payment."""
+    session_id = cart_session or x_cart_session
     errors = []
-    
+
     # Get cart
     cart = None
     if current_user:
         cart = db.query(Cart).filter(Cart.user_id == current_user.id).first()
-    elif cart_session:
-        cart = db.query(Cart).filter(Cart.session_id == cart_session).first()
+    elif session_id:
+        cart = db.query(Cart).filter(Cart.session_id == session_id).first()
     
     if not cart:
         errors.append("No hay productos en el carrito")
@@ -169,14 +173,10 @@ async def create_payment_intent(
     checkout_data: CheckoutCreate,
     db: DbSession,
     current_user: CurrentUserOptional,
-    cart_session: Optional[str] = Cookie(None)
+    cart_session: Optional[str] = Cookie(None),
+    x_cart_session: Optional[str] = None,
 ):
-    """
-    Create a payment intent for Stripe.
-    
-    MVP: Returns a mock payment intent.
-    Production: Integrate with Stripe API.
-    """
+    """Create a payment intent for Stripe."""
     # Validate first
     validation = await validate_checkout(checkout_data, db, current_user, cart_session)
     
@@ -214,20 +214,17 @@ async def complete_checkout(
     checkout_data: CheckoutCreate,
     db: DbSession,
     current_user: CurrentUserOptional,
-    cart_session: Optional[str] = Cookie(None)
+    cart_session: Optional[str] = Cookie(None),
+    x_cart_session: Optional[str] = None,
 ):
-    """
-    Complete checkout and create order after payment.
-    
-    MVP: Accepts mock payment intent IDs.
-    Production: Verify payment with Stripe.
-    """
+    """Complete checkout and create order after payment."""
+    session_id = cart_session or x_cart_session
     # Get cart
     cart = None
     if current_user:
         cart = db.query(Cart).filter(Cart.user_id == current_user.id).first()
-    elif cart_session:
-        cart = db.query(Cart).filter(Cart.session_id == cart_session).first()
+    elif session_id:
+        cart = db.query(Cart).filter(Cart.session_id == session_id).first()
     
     if not cart:
         raise HTTPException(

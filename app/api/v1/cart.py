@@ -138,11 +138,14 @@ async def get_cart(
     current_user: CurrentUserOptional,
     response: Response,
     cart_session: Optional[str] = Cookie(None),
+    x_cart_session: Optional[str] = None,
 ):
-    session_id = cart_session
+    # Accept cart_session from both cookie and header (for cross-domain scenarios)
+    session_id = cart_session or x_cart_session
     if not current_user and not session_id:
         session_id = str(uuid.uuid4())
         set_cart_cookie(response, session_id)
+        response.headers["X-Cart-Session"] = session_id
 
     cart = get_or_create_cart(db, current_user, session_id)
     return cart_to_response(_load_cart(db, cart.id), db)
@@ -155,12 +158,15 @@ async def add_to_cart(
     current_user: CurrentUserOptional,
     response: Response,
     cart_session: Optional[str] = Cookie(None),
+    x_cart_session: Optional[str] = None,
 ):
     """Add a product variant to the cart."""
-    session_id = cart_session
+    # Accept cart_session from both cookie and header
+    session_id = cart_session or x_cart_session
     if not current_user and not session_id:
         session_id = str(uuid.uuid4())
         set_cart_cookie(response, session_id)
+        response.headers["X-Cart-Session"] = session_id
 
     variant = db.query(ProductVariant).options(
         joinedload(ProductVariant.product)
@@ -219,8 +225,10 @@ async def update_cart_item(
     db: DbSession,
     current_user: CurrentUserOptional,
     cart_session: Optional[str] = Cookie(None),
+    x_cart_session: Optional[str] = None,
 ):
-    cart = get_or_create_cart(db, current_user, cart_session)
+    session_id = cart_session or x_cart_session
+    cart = get_or_create_cart(db, current_user, session_id)
     cart_item = db.query(CartItem).options(
         joinedload(CartItem.variant)
     ).filter(
@@ -247,8 +255,10 @@ async def remove_cart_item(
     db: DbSession,
     current_user: CurrentUserOptional,
     cart_session: Optional[str] = Cookie(None),
+    x_cart_session: Optional[str] = None,
 ):
-    cart = get_or_create_cart(db, current_user, cart_session)
+    session_id = cart_session or x_cart_session
+    cart = get_or_create_cart(db, current_user, session_id)
     cart_item = db.query(CartItem).filter(
         CartItem.id == item_id, CartItem.cart_id == cart.id
     ).first()
@@ -266,8 +276,10 @@ async def clear_cart(
     db: DbSession,
     current_user: CurrentUserOptional,
     cart_session: Optional[str] = Cookie(None),
+    x_cart_session: Optional[str] = None,
 ):
-    cart = get_or_create_cart(db, current_user, cart_session)
+    session_id = cart_session or x_cart_session
+    cart = get_or_create_cart(db, current_user, session_id)
     db.query(CartItem).filter(CartItem.cart_id == cart.id).delete()
     cart.coupon_code = None
     db.commit()
@@ -280,8 +292,10 @@ async def apply_coupon(
     db: DbSession,
     current_user: CurrentUserOptional,
     cart_session: Optional[str] = Cookie(None),
+    x_cart_session: Optional[str] = None,
 ):
-    cart = get_or_create_cart(db, current_user, cart_session)
+    session_id = cart_session or x_cart_session
+    cart = get_or_create_cart(db, current_user, session_id)
     cart = _load_cart(db, cart.id)
 
     coupon = db.query(Coupon).filter(Coupon.code == coupon_data.code.upper()).first()
@@ -307,8 +321,10 @@ async def remove_coupon(
     db: DbSession,
     current_user: CurrentUserOptional,
     cart_session: Optional[str] = Cookie(None),
+    x_cart_session: Optional[str] = None,
 ):
-    cart = get_or_create_cart(db, current_user, cart_session)
+    session_id = cart_session or x_cart_session
+    cart = get_or_create_cart(db, current_user, session_id)
     cart.coupon_code = None
     db.commit()
     return cart_to_response(_load_cart(db, cart.id), db)
