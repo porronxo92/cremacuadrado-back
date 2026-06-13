@@ -19,6 +19,7 @@ from app.schemas.order import (
 )
 from app.services.email import EmailService
 from app.config import settings
+from app.utils.url import normalize_image_url
 
 router = APIRouter()
 
@@ -308,7 +309,7 @@ async def complete_checkout(
             product_id=product.id,
             product_name=product.name,
             product_sku=product.sku,
-            product_image_url=product.primary_image,
+            product_image_url=normalize_image_url(product.primary_image),
             quantity=cart_item.quantity,
             unit_price=cart_item.price_at_add,
             total=cart_item.price_at_add * cart_item.quantity,

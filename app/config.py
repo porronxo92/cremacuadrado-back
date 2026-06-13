@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     ADMIN_EMAIL: str = "admin@cremacuadrado.com"
     ADMIN_PASSWORD: str  # Required — set via .env, never hardcode
 
+    # Base URL for absolute image URLs (frontend production workaround)
+    # Leave empty for relative URLs; set to https://cremacuadrado-back.vercel.app in production
+    BASE_URL: str = ""
+
     # Security headers
     SECURE_HEADERS: bool = True  # Set False only for local dev if needed
 

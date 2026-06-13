@@ -13,6 +13,7 @@ from app.schemas.blog import (
 )
 from app.schemas.common import PaginatedResponse
 from app.config import settings
+from app.utils.url import normalize_image_url
 
 router = APIRouter()
 
@@ -50,7 +51,7 @@ async def list_posts(
             slug=post.slug,
             title=post.title,
             excerpt=post.excerpt,
-            featured_image_url=post.featured_image_url,
+            featured_image_url=normalize_image_url(post.featured_image_url),
             categories=post.categories,
             published_at=post.published_at,
         )
@@ -84,7 +85,7 @@ async def get_post(slug: str, db: DbSession):
         excerpt=post.excerpt,
         content=post.content,
         author_name=post.author.full_name if post.author else None,
-        featured_image_url=post.featured_image_url,
+        featured_image_url=normalize_image_url(post.featured_image_url),
         status=post.status,
         categories=post.categories,
         published_at=post.published_at,

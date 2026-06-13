@@ -19,6 +19,7 @@ from app.schemas.cart import (
 )
 from app.schemas.common import Message
 from app.config import settings
+from app.utils.url import normalize_image_url
 
 router = APIRouter()
 
@@ -91,7 +92,7 @@ def cart_to_response(cart: Cart, db: Session) -> CartResponse:
             product_name=product.name,
             product_slug=product.slug,
             variant_format=variant.format,
-            product_image=product.primary_image,
+            product_image=normalize_image_url(product.primary_image),
             unit_price=variant.price,
             price_at_add=item.price_at_add,
             quantity=item.quantity,

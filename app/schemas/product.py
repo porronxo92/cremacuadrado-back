@@ -2,7 +2,7 @@
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # =============================================================================
@@ -41,6 +41,13 @@ class ProductImageResponse(BaseModel):
     is_primary: bool
 
     model_config = {"from_attributes": True}
+
+    @field_validator('url', mode='before')
+    @classmethod
+    def normalize_url(cls, v: str) -> str:
+        """Normalize image URLs to use correct paths."""
+        from app.utils.url import normalize_image_url
+        return normalize_image_url(v) or v
 
 
 # =============================================================================

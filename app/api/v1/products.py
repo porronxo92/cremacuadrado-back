@@ -15,6 +15,7 @@ from app.schemas.product import (
 )
 from app.schemas.common import PaginatedResponse
 from app.config import settings
+from app.utils.url import normalize_image_url
 
 router = APIRouter()
 
@@ -45,7 +46,7 @@ def _product_to_list_response(product: Product) -> ProductListResponse:
         badge_color=product.badge_color,
         is_in_stock=product.is_in_stock,
         is_featured=product.is_featured,
-        primary_image=product.primary_image,
+        primary_image=normalize_image_url(product.primary_image),
         category_slug=product.category.slug if product.category else None,
         variants=[_variant_response(v) for v in product.variants if v.is_active],
         average_rating=product.average_rating,
