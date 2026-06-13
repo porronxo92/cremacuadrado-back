@@ -30,8 +30,8 @@ def set_cart_cookie(response: Response, session_id: str) -> None:
         value=session_id,
         httponly=True,
         max_age=60 * 60 * 24 * 30,
-        samesite="none" if settings.DEBUG else "lax",
-        secure=not settings.DEBUG,
+        samesite="none",
+        secure=True,
     )
 
 
