@@ -60,7 +60,31 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Cart-Session"],
 )
+
+
+@app.middleware("http")
+async def cart_session_middleware(request: Request, call_next):
+    """
+    Accept cart_session from both cookie and header (for cross-domain scenarios).
+    Expose X-Cart-Session header in response for frontend to cache.
+    """
+    # Read session from cookie or header (header takes precedence for cross-origin)
+    session_from_header = request.headers.get("X-Cart-Session")
+    session_from_cookie = request.cookies.get("cart_session")
+    cart_session = session_from_header or session_from_cookie
+
+    # Store in request state for use by endpoints
+    request.state.cart_session = cart_session
+
+    response = await call_next(request)
+
+    # Expose the session in response header if present
+    if cart_session:
+        response.headers["X-Cart-Session"] = cart_session
+
+    return response
 
 
 @app.middleware("http")
