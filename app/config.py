@@ -53,9 +53,17 @@ class Settings(BaseSettings):
     DEFAULT_PAGE_SIZE: int = 12
     MAX_PAGE_SIZE: int = 100
     
-    # Email (MVP: logs only)
+    # Email — set EMAIL_ENABLED=True and configure SMTP to send real emails
+    # Gmail: SMTP_HOST=smtp.gmail.com, SMTP_PORT=587, SMTP_USER=tu@gmail.com
+    #        SMTP_PASSWORD=app-password-16-chars (Google Account › Security › App passwords)
     EMAIL_ENABLED: bool = False
     EMAIL_FROM: str = "info@cremacuadrado.com"
+    EMAIL_FROM_NAME: str = "CremaCuadrado"
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SITE_URL: str = "https://cremacuadrado-front.vercel.app"
     
     # Admin
     ADMIN_EMAIL: str = "admin@cremacuadrado.com"
@@ -64,6 +72,19 @@ class Settings(BaseSettings):
     # Base URL for absolute image URLs (frontend production workaround)
     # Leave empty for relative URLs; set to https://cremacuadrado-back.vercel.app in production
     BASE_URL: str = ""
+
+    # Stripe
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_PUBLISHABLE_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_CURRENCY: str = "eur"
+
+    # Google OAuth — set GOOGLE_CLIENT_ID in .env with your OAuth 2.0 client ID
+    # Get it at: console.cloud.google.com → APIs & Services → Credentials
+    GOOGLE_CLIENT_ID: str = ""
+
+    # Ghost order cleanup — cancel pending_payment orders older than this (minutes)
+    PENDING_ORDER_EXPIRE_MINUTES: int = 30
 
     # Security headers
     SECURE_HEADERS: bool = True  # Set False only for local dev if needed

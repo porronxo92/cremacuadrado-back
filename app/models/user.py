@@ -14,7 +14,7 @@ class User(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
-    password_hash = Column(String(255), nullable=False)
+    password_hash = Column(String(255), nullable=True)  # nullable for Google OAuth users
     first_name = Column(String(100), nullable=False)
     last_name = Column(String(100), nullable=False)
     phone = Column(String(20), nullable=True)
@@ -22,6 +22,10 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     email_verified = Column(Boolean, default=False, nullable=False)
     marketing_opt_in = Column(Boolean, default=False, nullable=False)
+    # Incremented on logout to invalidate all previously issued JWTs for this user
+    token_version = Column(Integer, default=0, nullable=False)
+    # Google OAuth sub (unique per Google account)
+    google_id = Column(String(255), nullable=True, unique=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     

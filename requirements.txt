@@ -21,6 +21,19 @@ bcrypt==4.1.2
 # Utils
 python-dateutil==2.8.2
 python-slugify==8.0.4
+sqladmin==0.20.1
+
+# Payments
+stripe>=7.0.0
+
+# Rate limiting
+slowapi>=0.1.9
+
+# Task scheduling (ghost order cleanup)
+apscheduler>=3.10.0
+
+# Google OAuth ID token verification
+google-auth>=2.0.0
 
 # Development
 python-dotenv==1.0.1

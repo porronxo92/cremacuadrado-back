@@ -59,6 +59,7 @@ class Order(Base):
     # Relationships
     user = relationship("User", back_populates="orders")
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
+    payment_intents = relationship("PaymentIntent", back_populates="order")
     
     @property
     def shipping_address(self) -> dict:

@@ -63,11 +63,12 @@ class CheckoutCreate(BaseModel):
 
 
 class PaymentIntentResponse(BaseModel):
-    """Payment intent response (mock for MVP)."""
+    """Payment intent response (Stripe)."""
     payment_intent_id: str
     client_secret: str
     amount: int  # Amount in cents
     currency: str = "eur"
+    order_number: str  # Used by frontend in Stripe return_url
 
 
 class CheckoutValidation(BaseModel):
@@ -146,7 +147,7 @@ class OrderListResponse(BaseModel):
 
 class OrderStatusUpdate(BaseModel):
     """Order status update schema (admin)."""
-    status: str = Field(..., pattern="^(pending|paid|processing|shipped|delivered|cancelled|refunded)$")
+    status: str = Field(..., pattern="^(pending|pending_payment|payment_failed|paid|processing|shipped|delivered|cancelled|refunded)$")
     tracking_number: Optional[str] = None
     admin_notes: Optional[str] = None
 

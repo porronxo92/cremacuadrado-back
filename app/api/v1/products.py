@@ -33,6 +33,7 @@ def _variant_response(v: ProductVariant) -> ProductVariantResponse:
         is_in_stock=v.is_in_stock,
         is_low_stock=v.is_low_stock,
         sort_order=v.sort_order,
+        images=v.images,
     )
 
 
@@ -56,7 +57,7 @@ def _product_to_list_response(product: Product) -> ProductListResponse:
 
 def _load_product_query(db: Session):
     return db.query(Product).options(
-        joinedload(Product.variants),
+        joinedload(Product.variants).joinedload(ProductVariant.images),
         joinedload(Product.images),
         joinedload(Product.category),
         joinedload(Product.reviews),
@@ -128,7 +129,7 @@ async def list_featured_products(db: DbSession, limit: int = Query(4, ge=1, le=1
 async def get_product(slug: str, db: DbSession):
     """Get full product detail including all variants."""
     product = db.query(Product).options(
-        joinedload(Product.variants),
+        joinedload(Product.variants).joinedload(ProductVariant.images),
         joinedload(Product.images),
         joinedload(Product.category),
         joinedload(Product.nutrition),
@@ -140,6 +141,8 @@ async def get_product(slug: str, db: DbSession):
 
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado")
+
+    product_level_images = [img for img in product.images if img.variant_id is None]
 
     return ProductResponse(
         id=product.id,
@@ -153,7 +156,7 @@ async def get_product(slug: str, db: DbSession):
         is_featured=product.is_featured,
         is_in_stock=product.is_in_stock,
         category=product.category,
-        images=product.images,
+        images=product_level_images,
         nutrition=product.nutrition,
         variants=[_variant_response(v) for v in product.variants if v.is_active],
         average_rating=product.average_rating,

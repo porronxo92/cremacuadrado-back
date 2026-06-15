@@ -115,6 +115,11 @@ class ResetPassword(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=100)
 
 
+class GoogleAuthRequest(BaseModel):
+    """Google Identity Services login — frontend sends the ID token credential."""
+    id_token: str
+
+
 # =============================================================================
 # Address schemas
 # =============================================================================

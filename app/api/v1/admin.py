@@ -1,20 +1,25 @@
 """
 Admin API endpoints - Dashboard, Order Management, Product CRUD.
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Optional
 import csv
 import io
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import os
+import re
+import shutil
+import uuid as _uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, and_
 
 from app.api.deps import DbSession, AdminUser
 from app.models.user import User
-from app.models.product import Product, Category, Review, ProductVariant
+from app.models.product import Product, Category, Review, ProductVariant, ProductImage
 from app.models.order import Order, OrderItem
 from app.schemas.order import OrderResponse, OrderStatusUpdate
 from app.schemas.product import ProductResponse, ProductVariantResponse
@@ -25,6 +30,22 @@ from app.config import settings
 
 router = APIRouter()
 
+VALID_ORDER_STATUSES = {
+    "pending_payment", "payment_failed", "paid",
+    "processing", "shipped", "delivered", "cancelled", "refunded",
+}
+
+_STATIC_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "..", "static")
+_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".avif"}
+
+
+def _safe_dest(dest_path: str) -> str:
+    """Resolve dest_path relative to static/images/, reject traversal attempts."""
+    clean = re.sub(r"[^a-zA-Z0-9 _\-/.]", "", dest_path).strip("/")
+    if ".." in clean:
+        raise HTTPException(status_code=400, detail="Ruta no permitida")
+    return clean
+
 
 def _variant_resp(v: ProductVariant) -> ProductVariantResponse:
     return ProductVariantResponse(
@@ -32,10 +53,12 @@ def _variant_resp(v: ProductVariant) -> ProductVariantResponse:
         price=v.price, compare_price=v.compare_price, stock=v.stock,
         is_active=v.is_active, is_in_stock=v.is_in_stock, is_low_stock=v.is_low_stock,
         sort_order=v.sort_order,
+        images=v.images,
     )
 
 
 def _product_response(product: Product) -> ProductResponse:
+    product_level_images = [img for img in product.images if img.variant_id is None]
     return ProductResponse(
         id=product.id,
         sku=product.sku,
@@ -48,7 +71,7 @@ def _product_response(product: Product) -> ProductResponse:
         is_featured=product.is_featured,
         is_in_stock=product.is_in_stock,
         category=product.category,
-        images=product.images,
+        images=product_level_images,
         nutrition=product.nutrition,
         variants=[_variant_resp(v) for v in product.variants],
         average_rating=product.average_rating,
@@ -65,7 +88,7 @@ def _product_response(product: Product) -> ProductResponse:
 @router.get("/dashboard", response_model=DashboardStats)
 async def get_dashboard(db: DbSession, admin_user: AdminUser):
     """Get dashboard statistics."""
-    today = datetime.utcnow().date()
+    today = datetime.now(timezone.utc).date()
     today_start = datetime.combine(today, datetime.min.time())
     period_start = today_start - timedelta(days=30)
     prev_period_start = period_start - timedelta(days=30)
@@ -290,17 +313,23 @@ async def update_order_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Pedido no encontrado"
         )
-    
+
+    if status_data.status not in VALID_ORDER_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Estado no válido. Valores permitidos: {', '.join(sorted(VALID_ORDER_STATUSES))}"
+        )
+
     old_status = order.status
     order.status = status_data.status
     
     # Update timestamps
     if status_data.status == "shipped":
-        order.shipped_at = datetime.utcnow()
+        order.shipped_at = datetime.now(timezone.utc)
         if status_data.tracking_number:
             order.tracking_number = status_data.tracking_number
     elif status_data.status == "delivered":
-        order.delivered_at = datetime.utcnow()
+        order.delivered_at = datetime.now(timezone.utc)
     
     if status_data.admin_notes:
         order.admin_notes = status_data.admin_notes
@@ -415,7 +444,7 @@ async def export_orders_csv(
     
     output.seek(0)
     
-    filename = f"pedidos_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    filename = f"pedidos_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
     
     return StreamingResponse(
         iter([output.getvalue()]),
@@ -440,7 +469,7 @@ async def list_products_admin(
 ):
     """List all products (admin)."""
     query = db.query(Product).options(
-        joinedload(Product.variants),
+        joinedload(Product.variants).joinedload(ProductVariant.images),
         joinedload(Product.images),
         joinedload(Product.category),
         joinedload(Product.nutrition),
@@ -489,8 +518,9 @@ async def create_product(
     db.refresh(product)
 
     product = db.query(Product).options(
-        joinedload(Product.variants), joinedload(Product.images),
-        joinedload(Product.category), joinedload(Product.nutrition), joinedload(Product.reviews),
+        joinedload(Product.variants).joinedload(ProductVariant.images),
+        joinedload(Product.images), joinedload(Product.category),
+        joinedload(Product.nutrition), joinedload(Product.reviews),
     ).filter(Product.id == product.id).first()
 
     return _product_response(product)
@@ -522,8 +552,9 @@ async def update_product(
     db.refresh(product)
 
     product = db.query(Product).options(
-        joinedload(Product.variants), joinedload(Product.images),
-        joinedload(Product.category), joinedload(Product.nutrition), joinedload(Product.reviews),
+        joinedload(Product.variants).joinedload(ProductVariant.images),
+        joinedload(Product.images), joinedload(Product.category),
+        joinedload(Product.nutrition), joinedload(Product.reviews),
     ).filter(Product.id == product.id).first()
 
     return _product_response(product)
@@ -537,18 +568,103 @@ async def delete_product(
 ):
     """Delete a product (admin). Soft delete by setting is_active=False."""
     product = db.query(Product).filter(Product.id == product_id).first()
-    
+
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Producto no encontrado"
         )
-    
+
     # Soft delete
     product.is_active = False
     db.commit()
-    
+
     return Message(message="Producto eliminado")
+
+
+# =============================================================================
+# Image Upload
+# =============================================================================
+
+@router.post("/upload-image")
+async def upload_image(
+    admin_user: AdminUser,
+    file: UploadFile = File(...),
+    dest_path: str = Form(...),
+):
+    """
+    Upload an image file and save it under static/images/{dest_path}/.
+    Returns the public URL for the saved file.
+
+    dest_path examples:
+      "products/Crema Pistacho Pura/200gr"
+      "blog"
+      "categories"
+    """
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in _ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Formato no permitido. Usa: {', '.join(_ALLOWED_EXTENSIONS)}",
+        )
+
+    clean_path = _safe_dest(dest_path)
+    target_dir = os.path.join(_STATIC_ROOT, "images", clean_path)
+    os.makedirs(target_dir, exist_ok=True)
+
+    # Preserve original name but sanitize it; add uuid prefix to avoid collisions
+    safe_name = re.sub(r"[^a-zA-Z0-9._\-]", "_", os.path.basename(file.filename or "file"))
+    filename = f"{_uuid.uuid4().hex[:8]}_{safe_name}"
+    dest_file = os.path.join(target_dir, filename)
+
+    with open(dest_file, "wb") as out:
+        shutil.copyfileobj(file.file, out)
+
+    public_url = f"/static/images/{clean_path}/{filename}"
+    return {"url": public_url, "filename": filename}
+
+
+@router.put("/products/{product_id}/variants/{variant_id}", response_model=ProductVariantResponse)
+async def update_variant(
+    product_id: int,
+    variant_id: int,
+    variant_data: dict,
+    db: DbSession,
+    admin_user: AdminUser,
+):
+    """Update a product variant's price, stock or active status (admin)."""
+    variant = db.query(ProductVariant).filter(
+        ProductVariant.id == variant_id,
+        ProductVariant.product_id == product_id,
+    ).first()
+    if not variant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Variante no encontrada")
+
+    allowed = {"price", "compare_price", "stock", "is_active", "sku"}
+    for field, value in variant_data.items():
+        if field in allowed:
+            setattr(variant, field, value)
+
+    if "image_url" in variant_data and variant_data["image_url"]:
+        new_url: str = variant_data["image_url"]
+        existing = db.query(ProductImage).filter(
+            ProductImage.variant_id == variant.id,
+            ProductImage.is_primary == True,
+        ).first()
+        if existing:
+            existing.url = new_url
+        else:
+            db.add(ProductImage(
+                product_id=variant.product_id,
+                variant_id=variant.id,
+                url=new_url,
+                is_primary=True,
+                sort_order=0,
+            ))
+
+    db.commit()
+    db.refresh(variant)
+    return _variant_resp(variant)
 
 
 # =============================================================================

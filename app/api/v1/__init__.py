@@ -9,6 +9,7 @@ from app.api.v1.orders import router as orders_router
 from app.api.v1.users import router as users_router
 from app.api.v1.blog import router as blog_router
 from app.api.v1.admin import router as admin_router
+from app.api.v1.webhooks import router as webhooks_router
 
 router = APIRouter()
 
@@ -20,3 +21,4 @@ router.include_router(orders_router, prefix="/orders", tags=["Orders"])
 router.include_router(users_router, prefix="/users", tags=["Users"])
 router.include_router(blog_router, prefix="/blog", tags=["Blog"])
 router.include_router(admin_router, prefix="/admin", tags=["Admin"])
+router.include_router(webhooks_router, prefix="/webhooks", tags=["Webhooks"])

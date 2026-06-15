@@ -1,78 +1,344 @@
-"""Email service - MVP: logs to console instead of sending real emails."""
+"""
+Email service — SMTP with inline-CSS HTML templates.
+Set EMAIL_ENABLED=True in .env and configure SMTP_* variables to send real emails.
+"""
+import smtplib
+import traceback
+from datetime import datetime
+from decimal import Decimal
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from typing import Optional
+
 from app.config import settings
 
 
-class EmailService:
-    """
-    Email service for sending transactional emails.
-    
-    MVP Implementation: Logs emails to console instead of actually sending them.
-    In production, integrate with SendGrid, SES, or similar service.
-    """
-    
-    @staticmethod
-    def send_email(
-        to_email: str,
-        subject: str,
-        html_content: str,
-        text_content: Optional[str] = None
-    ) -> bool:
-        """
-        Send an email.
-        
-        MVP: Logs to console.
-        """
-        if not settings.EMAIL_ENABLED:
-            print("=" * 60)
-            print(f"📧 EMAIL (not sent - EMAIL_ENABLED=False)")
-            print(f"To: {to_email}")
-            print(f"From: {settings.EMAIL_FROM}")
-            print(f"Subject: {subject}")
-            print("-" * 60)
-            print(html_content[:500] + "..." if len(html_content) > 500 else html_content)
-            print("=" * 60)
-            return True
-        
-        # TODO: Implement real email sending here
-        # Example with SendGrid:
-        # import sendgrid
-        # sg = sendgrid.SendGridAPIClient(api_key=settings.SENDGRID_API_KEY)
-        # ...
-        
+# ---------------------------------------------------------------------------
+# Core send
+# ---------------------------------------------------------------------------
+
+def _send(to_email: str, subject: str, html: str, text: str = "") -> bool:
+    sender = f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM}>"
+
+    if not settings.EMAIL_ENABLED:
+        print("=" * 70)
+        print(f"EMAIL (not sent -- set EMAIL_ENABLED=True in .env)")
+        print(f"   To: {to_email}")
+        print(f"   Subject: {subject}")
+        print("=" * 70)
         return True
-    
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = sender
+        msg["To"] = to_email
+        if text:
+            msg.attach(MIMEText(text, "plain", "utf-8"))
+        msg.attach(MIMEText(html, "html", "utf-8"))
+
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            server.sendmail(settings.EMAIL_FROM, [to_email], msg.as_string())
+        return True
+    except Exception:
+        traceback.print_exc()
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Shared HTML layout
+# ---------------------------------------------------------------------------
+
+def _wrap_layout(inner_html: str) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CremaCuadrado</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F4F1E9;font-family:Georgia,'Times New Roman',serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4F1E9;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+
+          <!-- HEADER -->
+          <tr>
+            <td style="background-color:#7B1716;padding:32px 40px;text-align:center;border-radius:8px 8px 0 0;">
+              <p style="margin:0;font-family:Arial,sans-serif;font-size:11px;letter-spacing:4px;text-transform:uppercase;color:#E6C15A;">crema de pistacho manchego</p>
+              <h1 style="margin:8px 0 0;font-family:Arial,sans-serif;font-size:28px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#F4F1E9;">CREMACUADRADO</h1>
+            </td>
+          </tr>
+
+          <!-- BODY -->
+          <tr>
+            <td style="background-color:#ffffff;padding:40px 40px 32px;border-left:1px solid #e8e3d8;border-right:1px solid #e8e3d8;">
+              {inner_html}
+            </td>
+          </tr>
+
+          <!-- FOOTER -->
+          <tr>
+            <td style="background-color:#1C1A14;padding:24px 40px;border-radius:0 0 8px 8px;text-align:center;">
+              <p style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:12px;color:#6B6456;">
+                CremaCuadrado · Crema de pistacho manchego artesanal
+              </p>
+              <p style="margin:0;font-family:Arial,sans-serif;font-size:11px;color:#4a453d;">
+                <a href="{settings.SITE_URL}/privacidad" style="color:#6B6456;text-decoration:none;">Privacidad</a>
+                &nbsp;·&nbsp;
+                <a href="{settings.SITE_URL}/condiciones-venta" style="color:#6B6456;text-decoration:none;">Condiciones de venta</a>
+                &nbsp;·&nbsp;
+                <a href="{settings.SITE_URL}/devoluciones" style="color:#6B6456;text-decoration:none;">Devoluciones</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+
+def _btn(url: str, label: str) -> str:
+    return f"""<p style="text-align:center;margin:32px 0 0;">
+  <a href="{url}"
+     style="display:inline-block;padding:14px 32px;background-color:#7B1716;color:#F4F1E9;
+            font-family:Arial,sans-serif;font-size:14px;font-weight:600;text-decoration:none;
+            border-radius:24px;letter-spacing:0.5px;">
+    {label}
+  </a>
+</p>"""
+
+
+# ---------------------------------------------------------------------------
+# Order confirmation email
+# ---------------------------------------------------------------------------
+
+class OrderEmailData:
+    """Structured data for the order confirmation email."""
+
+    def __init__(
+        self,
+        to_email: str,
+        customer_name: str,
+        order_number: str,
+        order_date: datetime,
+        items: list,           # list of dicts: {name, qty, unit_price, total}
+        subtotal: Decimal,
+        shipping_cost: Decimal,
+        discount: Decimal,
+        total: Decimal,
+        shipping_address: dict,
+        coupon_code: Optional[str] = None,
+        customer_notes: Optional[str] = None,
+    ):
+        self.to_email = to_email
+        self.customer_name = customer_name
+        self.order_number = order_number
+        self.order_date = order_date
+        self.items = items
+        self.subtotal = subtotal
+        self.shipping_cost = shipping_cost
+        self.discount = discount
+        self.total = total
+        self.shipping_address = shipping_address
+        self.coupon_code = coupon_code
+        self.customer_notes = customer_notes
+
+
+def send_order_confirmation(data: OrderEmailData) -> bool:
+    order_url = f"{settings.SITE_URL}/account/orders"
+    date_str = data.order_date.strftime("%d/%m/%Y %H:%M")
+
+    # Items rows
+    items_rows = ""
+    for item in data.items:
+        items_rows += f"""
+        <tr>
+          <td style="padding:12px 0;border-bottom:1px solid #F0EBE1;font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;">
+            {item['name']}
+          </td>
+          <td style="padding:12px 8px;border-bottom:1px solid #F0EBE1;font-family:Arial,sans-serif;font-size:14px;color:#6B6456;text-align:center;">
+            {item['qty']}
+          </td>
+          <td style="padding:12px 0;border-bottom:1px solid #F0EBE1;font-family:Arial,sans-serif;font-size:14px;color:#6B6456;text-align:right;">
+            {item['unit_price']:.2f} €
+          </td>
+          <td style="padding:12px 0;border-bottom:1px solid #F0EBE1;font-family:Arial,sans-serif;font-size:14px;font-weight:600;color:#1C1A14;text-align:right;">
+            {item['total']:.2f} €
+          </td>
+        </tr>"""
+
+    # Totals rows
+    shipping_label = "Envío gratuito" if data.shipping_cost == 0 else f"{data.shipping_cost:.2f} €"
+    discount_row = ""
+    if data.discount and data.discount > 0:
+        coupon_label = f" ({data.coupon_code})" if data.coupon_code else ""
+        discount_row = f"""
+        <tr>
+          <td colspan="3" style="padding:6px 0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;text-align:right;">
+            Descuento{coupon_label}
+          </td>
+          <td style="padding:6px 0;font-family:Arial,sans-serif;font-size:13px;color:#27ae60;text-align:right;">
+            −{data.discount:.2f} €
+          </td>
+        </tr>"""
+
+    # Shipping address
+    addr = data.shipping_address
+    full_name = f"{addr.get('first_name', '')} {addr.get('last_name', '')}".strip()
+    addr_lines = [
+        full_name,
+        addr.get("street", ""),
+        f"{addr.get('postal_code', '')} {addr.get('city', '')}".strip(),
+        addr.get("province", ""),
+        addr.get("country", ""),
+    ]
+    addr_html = "<br>".join(line for line in addr_lines if line)
+
+    # Notes
+    notes_block = ""
+    if data.customer_notes:
+        notes_block = f"""
+        <div style="margin-top:24px;padding:16px;background-color:#F4F1E9;border-radius:6px;border-left:3px solid #E6C15A;">
+          <p style="margin:0 0 4px;font-family:Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#6B6456;">Notas del pedido</p>
+          <p style="margin:0;font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;">{data.customer_notes}</p>
+        </div>"""
+
+    inner = f"""
+      <!-- Greeting -->
+      <h2 style="margin:0 0 6px;font-family:Arial,sans-serif;font-size:22px;font-weight:700;color:#7B1716;">
+        ¡Gracias por tu pedido, {data.customer_name}!
+      </h2>
+      <p style="margin:0 0 28px;font-family:Arial,sans-serif;font-size:15px;color:#6B6456;line-height:1.5;">
+        Hemos recibido tu pedido y lo estamos preparando con todo el cuidado que se merece.
+      </p>
+
+      <!-- Order meta pill row -->
+      <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:32px;">
+        <tr>
+          <td style="width:50%;padding:16px;background-color:#F4F1E9;border-radius:6px 0 0 6px;border:1px solid #E8E3D8;">
+            <p style="margin:0 0 2px;font-family:Arial,sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#6B6456;">Número de pedido</p>
+            <p style="margin:0;font-family:Arial,sans-serif;font-size:16px;font-weight:700;color:#7B1716;">{data.order_number}</p>
+          </td>
+          <td width="2" style="background-color:#E8E3D8;"></td>
+          <td style="width:50%;padding:16px;background-color:#F4F1E9;border-radius:0 6px 6px 0;border:1px solid #E8E3D8;border-left:none;">
+            <p style="margin:0 0 2px;font-family:Arial,sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#6B6456;">Fecha</p>
+            <p style="margin:0;font-family:Arial,sans-serif;font-size:15px;font-weight:600;color:#1C1A14;">{date_str}</p>
+          </td>
+        </tr>
+      </table>
+
+      <!-- Items table -->
+      <p style="margin:0 0 12px;font-family:Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#6B6456;font-weight:600;">Productos</p>
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <thead>
+          <tr style="border-bottom:2px solid #1C1A14;">
+            <th style="padding:0 0 8px;font-family:Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:#6B6456;text-align:left;font-weight:600;">Producto</th>
+            <th style="padding:0 8px 8px;font-family:Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:#6B6456;text-align:center;font-weight:600;">Uds.</th>
+            <th style="padding:0 0 8px;font-family:Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:#6B6456;text-align:right;font-weight:600;">Precio</th>
+            <th style="padding:0 0 8px;font-family:Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:#6B6456;text-align:right;font-weight:600;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items_rows}
+        </tbody>
+      </table>
+
+      <!-- Totals -->
+      <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;">
+        <tr>
+          <td colspan="3" style="padding:8px 0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;text-align:right;">Subtotal</td>
+          <td style="padding:8px 0;font-family:Arial,sans-serif;font-size:13px;color:#1C1A14;text-align:right;">{data.subtotal:.2f} €</td>
+        </tr>
+        <tr>
+          <td colspan="3" style="padding:4px 0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;text-align:right;">Envío</td>
+          <td style="padding:4px 0;font-family:Arial,sans-serif;font-size:13px;color:#1C1A14;text-align:right;">{shipping_label}</td>
+        </tr>
+        {discount_row}
+        <tr style="border-top:2px solid #1C1A14;">
+          <td colspan="3" style="padding:12px 0 0;font-family:Arial,sans-serif;font-size:16px;font-weight:700;color:#1C1A14;text-align:right;">Total</td>
+          <td style="padding:12px 0 0;font-family:Arial,sans-serif;font-size:18px;font-weight:700;color:#7B1716;text-align:right;">{data.total:.2f} €</td>
+        </tr>
+      </table>
+
+      <!-- Divider -->
+      <hr style="border:none;border-top:1px solid #E8E3D8;margin:32px 0;">
+
+      <!-- Shipping address -->
+      <p style="margin:0 0 12px;font-family:Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#6B6456;font-weight:600;">Dirección de envío</p>
+      <p style="margin:0;font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;line-height:1.8;">
+        {addr_html}
+      </p>
+
+      {notes_block}
+
+      <!-- Info box -->
+      <div style="margin-top:32px;padding:20px;background-color:#FFF9ED;border-radius:6px;border:1px solid #E6C15A;">
+        <p style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:14px;font-weight:600;color:#1C1A14;">¿Qué pasa ahora?</p>
+        <p style="margin:0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;line-height:1.6;">
+          Estamos preparando tu pedido. Recibirás otro email en cuanto lo enviemos con el número de seguimiento de Correos.
+          El plazo de entrega habitual es de <strong>2–4 días hábiles</strong>.
+        </p>
+      </div>
+
+      {_btn(order_url, "Ver mis pedidos")}
+    """
+
+    html = _wrap_layout(inner)
+    subject = f"Pedido {data.order_number} confirmado · CremaCuadrado"
+
+    text = (
+        f"Hola {data.customer_name}, tu pedido {data.order_number} ha sido confirmado.\n"
+        f"Total: {data.total:.2f} €\n"
+        f"Puedes ver los detalles en: {order_url}"
+    )
+
+    return _send(data.to_email, subject, html, text)
+
+
+# ---------------------------------------------------------------------------
+# Legacy method (used in non-webhook paths) — delegates to send_order_confirmation
+# ---------------------------------------------------------------------------
+
+class EmailService:
+
+    @staticmethod
+    def send_email(to_email: str, subject: str, html_content: str, text_content: str = "") -> bool:
+        return _send(to_email, subject, html_content, text_content)
+
     @classmethod
     def send_welcome_email(cls, to_email: str, first_name: str) -> bool:
-        """Send welcome email after registration."""
-        subject = "¡Bienvenido a Cremacuadrado!"
-        html_content = f"""
-        <h1>¡Hola {first_name}!</h1>
-        <p>Gracias por registrarte en Cremacuadrado.</p>
-        <p>Ya puedes disfrutar de nuestras deliciosas cremas de pistacho artesanales.</p>
-        <p><a href="https://cremacuadrado.com/tienda">Visitar la tienda</a></p>
-        <br>
-        <p>Un saludo,<br>El equipo de Cremacuadrado</p>
+        inner = f"""
+          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">¡Bienvenido, {first_name}!</h2>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+            Gracias por registrarte en CremaCuadrado. Ya puedes disfrutar de nuestras cremas de pistacho manchego artesanales.
+          </p>
+          {_btn(settings.SITE_URL + "/tienda", "Ver productos")}
         """
-        return cls.send_email(to_email, subject, html_content)
-    
+        return _send(to_email, "¡Bienvenido a CremaCuadrado!", _wrap_layout(inner))
+
     @classmethod
     def send_password_reset_email(cls, to_email: str, reset_token: str) -> bool:
-        """Send password reset email."""
-        subject = "Restablecer contraseña - Cremacuadrado"
-        reset_url = f"https://cremacuadrado.com/auth/reset-password?token={reset_token}"
-        html_content = f"""
-        <h1>Restablecer contraseña</h1>
-        <p>Has solicitado restablecer tu contraseña.</p>
-        <p>Haz clic en el siguiente enlace para crear una nueva contraseña:</p>
-        <p><a href="{reset_url}">Restablecer contraseña</a></p>
-        <p>Este enlace expirará en 1 hora.</p>
-        <p>Si no has solicitado esto, puedes ignorar este email.</p>
-        <br>
-        <p>Un saludo,<br>El equipo de Cremacuadrado</p>
+        reset_url = f"{settings.SITE_URL}/auth/reset-password?token={reset_token}"
+        inner = f"""
+          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Restablecer contraseña</h2>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+            Has solicitado restablecer tu contraseña. Haz clic en el botón y crea una nueva. El enlace caduca en 1 hora.
+          </p>
+          {_btn(reset_url, "Restablecer contraseña")}
+          <p style="margin-top:24px;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
+            Si no has solicitado esto, ignora este email.
+          </p>
         """
-        return cls.send_email(to_email, subject, html_content)
-    
+        return _send(to_email, "Restablecer contraseña · CremaCuadrado", _wrap_layout(inner))
+
     @classmethod
     def send_order_confirmation_email(
         cls,
@@ -80,82 +346,38 @@ class EmailService:
         order_number: str,
         customer_name: str,
         total: str,
-        items_html: str
+        items_html: str,
     ) -> bool:
-        """Send order confirmation email."""
-        subject = f"Confirmación de pedido #{order_number} - Cremacuadrado"
-        html_content = f"""
-        <h1>¡Gracias por tu pedido, {customer_name}!</h1>
-        <p>Hemos recibido tu pedido y lo estamos preparando.</p>
-        
-        <h2>Resumen del pedido #{order_number}</h2>
-        {items_html}
-        <p><strong>Total: {total}</strong></p>
-        
-        <p>Te avisaremos cuando enviemos tu pedido.</p>
-        <p><a href="https://cremacuadrado.com/mi-cuenta/pedidos/{order_number}">Ver detalles del pedido</a></p>
-        <br>
-        <p>Un saludo,<br>El equipo de Cremacuadrado</p>
+        """Legacy signature — kept for compatibility. Prefer send_order_confirmation()."""
+        inner = f"""
+          <h2 style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">¡Gracias por tu pedido, {customer_name}!</h2>
+          <p style="margin:0 0 24px;font-family:Arial,sans-serif;font-size:15px;color:#6B6456;">Pedido <strong>{order_number}</strong></p>
+          <div style="font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;">{items_html}</div>
+          <p style="margin-top:16px;font-family:Arial,sans-serif;font-size:18px;font-weight:700;color:#7B1716;">Total: {total}</p>
+          {_btn(settings.SITE_URL + "/account/orders", "Ver mi pedido")}
         """
-        return cls.send_email(to_email, subject, html_content)
-    
+        return _send(
+            to_email,
+            f"Pedido {order_number} confirmado · CremaCuadrado",
+            _wrap_layout(inner),
+        )
+
     @classmethod
     def send_order_shipped_email(
-        cls,
-        to_email: str,
-        order_number: str,
-        customer_name: str,
-        tracking_number: Optional[str] = None
+        cls, to_email: str, order_number: str, customer_name: str, tracking_number: Optional[str] = None
     ) -> bool:
-        """Send order shipped notification email."""
-        subject = f"Tu pedido #{order_number} ha sido enviado - Cremacuadrado"
-        
-        tracking_html = ""
+        tracking_block = ""
         if tracking_number:
-            tracking_html = f"""
-            <p><strong>Número de seguimiento:</strong> {tracking_number}</p>
-            <p><a href="https://www.correos.es/es/es/herramientas/localizador/envios/{tracking_number}">
-                Seguir envío en Correos
-            </a></p>
-            """
-        
-        html_content = f"""
-        <h1>¡Tu pedido está en camino, {customer_name}!</h1>
-        <p>Tu pedido #{order_number} ha sido enviado.</p>
-        {tracking_html}
-        <p>El tiempo de entrega estimado es de 48-72 horas.</p>
-        <br>
-        <p>Un saludo,<br>El equipo de Cremacuadrado</p>
+            track_url = f"https://www.correos.es/es/es/herramientas/localizador/envios/detalle?tracking-number={tracking_number}"
+            tracking_block = f"""
+              <div style="margin:24px 0;padding:16px;background-color:#F4F1E9;border-radius:6px;text-align:center;">
+                <p style="margin:0 0 4px;font-family:Arial,sans-serif;font-size:12px;color:#6B6456;text-transform:uppercase;letter-spacing:1px;">Número de seguimiento</p>
+                <p style="margin:0 0 12px;font-family:Arial,sans-serif;font-size:20px;font-weight:700;color:#1C1A14;letter-spacing:2px;">{tracking_number}</p>
+                {_btn(track_url, "Seguir en Correos")}
+              </div>"""
+        inner = f"""
+          <h2 style="margin:0 0 12px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">¡Tu pedido está en camino, {customer_name}!</h2>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#6B6456;">Pedido <strong>{order_number}</strong> · Entrega estimada: 2–4 días hábiles</p>
+          {tracking_block}
         """
-        return cls.send_email(to_email, subject, html_content)
-    
-    @classmethod
-    def send_order_status_update_email(
-        cls,
-        to_email: str,
-        order_number: str,
-        customer_name: str,
-        new_status: str
-    ) -> bool:
-        """Send order status update email."""
-        status_messages = {
-            "processing": "Estamos preparando tu pedido",
-            "shipped": "Tu pedido ha sido enviado",
-            "delivered": "Tu pedido ha sido entregado",
-            "cancelled": "Tu pedido ha sido cancelado",
-            "refunded": "Tu pedido ha sido reembolsado",
-        }
-        
-        message = status_messages.get(new_status, f"El estado ha cambiado a: {new_status}")
-        subject = f"Actualización de pedido #{order_number} - Cremacuadrado"
-        
-        html_content = f"""
-        <h1>Actualización de tu pedido</h1>
-        <p>Hola {customer_name},</p>
-        <p>{message}</p>
-        <p>Número de pedido: <strong>{order_number}</strong></p>
-        <p><a href="https://cremacuadrado.com/mi-cuenta/pedidos/{order_number}">Ver detalles del pedido</a></p>
-        <br>
-        <p>Un saludo,<br>El equipo de Cremacuadrado</p>
-        """
-        return cls.send_email(to_email, subject, html_content)
+        return _send(to_email, f"Tu pedido {order_number} ha sido enviado · CremaCuadrado", _wrap_layout(inner))

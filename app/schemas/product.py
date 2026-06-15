@@ -85,6 +85,7 @@ class ProductVariantResponse(BaseModel):
     is_in_stock: bool
     is_low_stock: bool
     sort_order: int
+    images: List[ProductImageResponse] = []
 
     model_config = {"from_attributes": True}
 

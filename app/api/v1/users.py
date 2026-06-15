@@ -65,10 +65,11 @@ async def change_password(
             detail="Contraseña actual incorrecta"
         )
     
-    # Update password
+    # Update password and invalidate all existing sessions
     current_user.password_hash = get_password_hash(password_data.new_password)
+    current_user.token_version = getattr(current_user, "token_version", 0) + 1
     db.commit()
-    
+
     return Message(message="Contraseña actualizada correctamente")
 
 

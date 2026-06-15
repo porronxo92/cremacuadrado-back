@@ -91,13 +91,22 @@ def get_current_user(
             detail="Usuario no encontrado",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Usuario desactivado",
         )
-    
+
+    # Verify token version — mismatch means the user has logged out since this token was issued
+    token_ver = payload.get("ver", 0)
+    if getattr(user, "token_version", 0) != token_ver:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sesión inválida. Inicia sesión de nuevo.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     return user
 
 

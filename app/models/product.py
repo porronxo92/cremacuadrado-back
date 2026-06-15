@@ -68,10 +68,11 @@ class Product(Base):
 
     @property
     def primary_image(self) -> str | None:
-        for img in self.images:
+        product_imgs = [img for img in self.images if img.variant_id is None]
+        for img in product_imgs:
             if img.is_primary:
                 return img.url
-        return self.images[0].url if self.images else None
+        return product_imgs[0].url if product_imgs else None
 
     @property
     def is_in_stock(self) -> bool:
@@ -122,6 +123,12 @@ class ProductVariant(Base):
 
     # Relationships
     product = relationship("Product", back_populates="variants")
+    images = relationship(
+        "ProductImage",
+        back_populates="variant",
+        order_by="ProductImage.sort_order",
+        foreign_keys="ProductImage.variant_id",
+    )
     cart_items = relationship("CartItem", back_populates="variant")
     order_items = relationship("OrderItem", back_populates="variant")
 
@@ -140,17 +147,19 @@ class ProductVariant(Base):
 class ProductImage(Base):
     """Product image model."""
     __tablename__ = "product_images"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    variant_id = Column(Integer, ForeignKey("product_variants.id", ondelete="CASCADE"), nullable=True, index=True)
     url = Column(String(500), nullable=False)
     alt_text = Column(String(200), nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)
     is_primary = Column(Boolean, default=False, nullable=False)
-    
+
     # Relationships
     product = relationship("Product", back_populates="images")
-    
+    variant = relationship("ProductVariant", back_populates="images", foreign_keys=[variant_id])
+
     def __repr__(self):
         return f"<ProductImage {self.id} for Product {self.product_id}>"
 

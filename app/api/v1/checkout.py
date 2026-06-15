@@ -4,6 +4,9 @@ Checkout API endpoints.
 from decimal import Decimal
 from typing import Optional
 import uuid
+from datetime import datetime
+
+import stripe as stripe_lib
 
 from fastapi import APIRouter, Depends, HTTPException, Cookie, status
 from sqlalchemy.orm import Session, joinedload
@@ -12,12 +15,13 @@ from app.api.deps import DbSession, CurrentUserOptional
 from app.models.cart import Cart, CartItem
 from app.models.product import Product
 from app.models.order import Order, OrderItem, Coupon
+from app.models.payment import PaymentIntent as PaymentIntentModel
 from app.models.user import User, Address
 from app.schemas.order import (
     CheckoutCreate, CheckoutValidation, PaymentIntentResponse,
     CompleteCheckout, OrderResponse, ShippingCostResponse
 )
-from app.services.email import EmailService
+from app.services import stripe_service
 from app.config import settings
 from app.utils.url import normalize_image_url
 
@@ -176,129 +180,57 @@ async def create_payment_intent(
     cart_session: Optional[str] = Cookie(None),
     x_cart_session: Optional[str] = None,
 ):
-    """Create a payment intent for Stripe."""
-    # Validate first
-    validation = await validate_checkout(checkout_data, db, current_user, cart_session)
-    
+    """
+    Create Stripe PaymentIntent, persist a pending order, and return client_secret.
+    The order transitions to 'paid' via the Stripe webhook after payment succeeds.
+    """
+    session_id = cart_session or x_cart_session
+
+    # Validate checkout data
+    validation = await validate_checkout(checkout_data, db, current_user, cart_session, x_cart_session)
     if not validation.is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=validation.errors[0] if validation.errors else "Error de validación"
         )
-    
-    # MVP: Mock payment intent
-    payment_intent_id = f"pi_mock_{uuid.uuid4().hex[:24]}"
-    client_secret = f"{payment_intent_id}_secret_{uuid.uuid4().hex[:24]}"
-    amount_cents = int(validation.total * 100)
-    
-    # TODO: In production, use Stripe:
-    # import stripe
-    # stripe.api_key = settings.STRIPE_SECRET_KEY
-    # intent = stripe.PaymentIntent.create(
-    #     amount=amount_cents,
-    #     currency='eur',
-    #     metadata={'cart_id': cart.id}
-    # )
-    
-    return PaymentIntentResponse(
-        payment_intent_id=payment_intent_id,
-        client_secret=client_secret,
-        amount=amount_cents,
-        currency="eur"
-    )
 
-
-@router.post("/complete", response_model=OrderResponse)
-async def complete_checkout(
-    complete_data: CompleteCheckout,
-    checkout_data: CheckoutCreate,
-    db: DbSession,
-    current_user: CurrentUserOptional,
-    cart_session: Optional[str] = Cookie(None),
-    x_cart_session: Optional[str] = None,
-):
-    """Complete checkout and create order after payment."""
-    session_id = cart_session or x_cart_session
-    # Get cart
+    # Reload cart with items + product images
     cart = None
     if current_user:
         cart = db.query(Cart).filter(Cart.user_id == current_user.id).first()
     elif session_id:
         cart = db.query(Cart).filter(Cart.session_id == session_id).first()
-    
+
     if not cart:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No hay productos en el carrito"
-        )
-    
-    # Load cart items
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Carrito no encontrado")
+
     cart = db.query(Cart).options(
         joinedload(Cart.items).joinedload(CartItem.product).joinedload(Product.images)
     ).filter(Cart.id == cart.id).first()
-    
-    if not cart.items:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El carrito está vacío"
-        )
-    
-    # Calculate totals
-    subtotal = cart.subtotal
-    
-    # Discount
-    discount = Decimal('0')
-    coupon_code = checkout_data.coupon_code or cart.coupon_code
-    if coupon_code:
-        coupon = db.query(Coupon).filter(
-            Coupon.code == coupon_code.upper()
-        ).first()
-        if coupon and coupon.is_valid:
-            discount = coupon.calculate_discount(subtotal)
-            coupon.used_count += 1
-    
-    subtotal_after_discount = subtotal - discount
-    
-    # Shipping
-    if subtotal_after_discount >= settings.FREE_SHIPPING_THRESHOLD:
-        shipping_cost = Decimal('0')
-    else:
-        shipping_cost = Decimal(str(settings.SHIPPING_COST))
-    
-    # Tax
-    tax_rate = Decimal(str(settings.TAX_RATE))
-    tax = (subtotal_after_discount + shipping_cost) * tax_rate / (1 + tax_rate)
-    
-    total = subtotal_after_discount + shipping_cost
-    
-    # Create order
-    from datetime import datetime
+
+    # Create Order (status='pending_payment' — stock NOT reduced yet)
     order = Order(
         user_id=current_user.id if current_user else None,
         order_number=Order.generate_order_number(),
-        status="paid",
-        subtotal=subtotal,
-        shipping_cost=shipping_cost,
-        discount=discount,
-        tax=tax.quantize(Decimal('0.01')),
-        total=total,
-        coupon_code=coupon_code,
+        status="pending_payment",
+        subtotal=validation.subtotal,
+        shipping_cost=validation.shipping_cost,
+        discount=validation.discount,
+        tax=validation.tax,
+        total=validation.total,
+        coupon_code=checkout_data.coupon_code or cart.coupon_code,
         guest_email=checkout_data.guest_email if not current_user else None,
         customer_notes=checkout_data.customer_notes,
-        payment_method=complete_data.payment_method,
-        payment_intent_id=complete_data.payment_intent_id,
-        paid_at=datetime.utcnow(),
+        payment_method="card",
     )
-    
-    # Set addresses
     order.shipping_address = checkout_data.shipping_address.model_dump()
     if checkout_data.billing_address and not checkout_data.same_billing_address:
         order.billing_address = checkout_data.billing_address.model_dump()
-    
+
     db.add(order)
-    db.flush()  # Get order.id
-    
-    # Create order items
+    db.flush()  # get order.id
+
+    # Snapshot order items (stock not yet reduced)
     for cart_item in cart.items:
         product = cart_item.product
         order_item = OrderItem(
@@ -312,56 +244,168 @@ async def complete_checkout(
             total=cart_item.price_at_add * cart_item.quantity,
         )
         db.add(order_item)
-        
-        # Reduce stock
-        product.stock -= cart_item.quantity
-    
-    # Save address if requested
-    if checkout_data.save_address and current_user:
-        addr = checkout_data.shipping_address
-        address = Address(
-            user_id=current_user.id,
-            first_name=addr.first_name,
-            last_name=addr.last_name,
-            street=addr.street,
-            street_2=addr.street_2,
-            city=addr.city,
-            province=addr.province,
-            postal_code=addr.postal_code,
-            country=addr.country,
-            phone=addr.phone,
-            is_default=False,
+
+    db.flush()  # persist items
+
+    amount_cents = int(validation.total * 100)
+    customer_email = current_user.email if current_user else checkout_data.guest_email
+
+    # Create Stripe PaymentIntent
+    try:
+        intent = stripe_service.create_payment_intent(
+            amount=amount_cents,
+            currency=settings.STRIPE_CURRENCY,
+            order_id=order.id,
+            order_number=order.order_number,
+            cart_id=cart.id,
+            customer_email=customer_email,
         )
-        db.add(address)
-    
-    # Clear cart
-    db.query(CartItem).filter(CartItem.cart_id == cart.id).delete()
-    cart.coupon_code = None
-    
+    except stripe_lib.StripeError as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error al conectar con el sistema de pago: {e.user_message or str(e)}"
+        )
+
+    # Persist PaymentIntent record
+    pi_record = PaymentIntentModel(
+        order_id=order.id,
+        stripe_payment_intent_id=intent.id,
+        stripe_client_secret=intent.client_secret,
+        amount=amount_cents,
+        currency=settings.STRIPE_CURRENCY,
+        status=intent.status,
+    )
+    db.add(pi_record)
+
+    # Update order with Stripe PI id
+    order.payment_intent_id = intent.id
+
     db.commit()
-    db.refresh(order)
-    
-    # Load order items
+
+    return PaymentIntentResponse(
+        payment_intent_id=intent.id,
+        client_secret=intent.client_secret,
+        amount=amount_cents,
+        currency=settings.STRIPE_CURRENCY,
+        order_number=order.order_number,
+    )
+
+
+@router.post("/complete", response_model=OrderResponse)
+async def complete_checkout(
+    complete_data: CompleteCheckout,
+    db: DbSession,
+    current_user: CurrentUserOptional,
+):
+    """
+    Called by the frontend after Stripe.js confirmPayment() returns.
+    Verifies the PaymentIntent status directly with Stripe before returning the order.
+    Does NOT create a new order — the order was already created in /create-payment-intent.
+    The order transitions to 'paid' via the Stripe webhook; this endpoint only confirms
+    the PI is succeeded and returns the order for the success page.
+    """
+    if not complete_data.payment_intent_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="payment_intent_id requerido"
+        )
+
+    # Find the PaymentIntent record in our DB
+    pi_record = db.query(PaymentIntentModel).filter(
+        PaymentIntentModel.stripe_payment_intent_id == complete_data.payment_intent_id
+    ).first()
+
+    if not pi_record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Registro de pago no encontrado"
+        )
+
+    # Verify payment status directly with Stripe — never trust frontend claims
+    try:
+        stripe_pi = stripe_lib.PaymentIntent.retrieve(complete_data.payment_intent_id)
+    except stripe_lib.StripeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Error al verificar el pago con Stripe"
+        )
+
+    if stripe_pi.status not in ("succeeded", "processing"):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=f"El pago no se ha completado (estado: {stripe_pi.status})"
+        )
+
+    # Load the order that was created in /create-payment-intent
     order = db.query(Order).options(
         joinedload(Order.items)
-    ).filter(Order.id == order.id).first()
-    
-    # Send confirmation email
-    customer_email = current_user.email if current_user else checkout_data.guest_email
-    customer_name = checkout_data.shipping_address.first_name
-    items_html = "<ul>"
-    for item in order.items:
-        items_html += f"<li>{item.product_name} x{item.quantity} - {item.total}€</li>"
-    items_html += "</ul>"
-    
-    EmailService.send_order_confirmation_email(
-        to_email=customer_email,
+    ).filter(Order.id == pi_record.order_id).first()
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pedido no encontrado"
+        )
+
+    # Authorization: authenticated user must own the order
+    if current_user and order.user_id and order.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso no autorizado"
+        )
+
+    return OrderResponse(
+        id=order.id,
         order_number=order.order_number,
-        customer_name=customer_name,
-        total=f"{order.total}€",
-        items_html=items_html,
+        status=order.status,
+        subtotal=order.subtotal,
+        shipping_cost=order.shipping_cost,
+        discount=order.discount,
+        coupon_code=order.coupon_code,
+        tax=order.tax,
+        total=order.total,
+        shipping_address=order.shipping_address,
+        billing_address=order.billing_address,
+        payment_method=order.payment_method,
+        tracking_number=order.tracking_number,
+        customer_notes=order.customer_notes,
+        items=order.items,
+        item_count=order.item_count,
+        created_at=order.created_at,
+        paid_at=order.paid_at,
+        shipped_at=order.shipped_at,
+        delivered_at=order.delivered_at,
     )
-    
+
+
+@router.get("/confirmation/{order_number}", response_model=OrderResponse)
+async def get_order_confirmation(
+    order_number: str,
+    db: DbSession,
+    current_user: CurrentUserOptional,
+    payment_intent: Optional[str] = None,
+):
+    """
+    Public endpoint for the post-payment success page.
+    Access is granted if:
+    - The user is authenticated and owns the order, OR
+    - The payment_intent_id query param matches the order (guest / just-paid flow)
+    """
+    order = db.query(Order).options(
+        joinedload(Order.items)
+    ).filter(Order.order_number == order_number).first()
+
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
+
+    # Authorization: authenticated owner OR valid payment_intent proof
+    is_owner = current_user and order.user_id == current_user.id
+    has_pi_proof = payment_intent and order.payment_intent_id == payment_intent
+
+    if not is_owner and not has_pi_proof:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso no autorizado")
+
     return OrderResponse(
         id=order.id,
         order_number=order.order_number,
