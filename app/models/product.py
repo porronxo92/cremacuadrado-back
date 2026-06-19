@@ -59,8 +59,8 @@ class Product(Base):
 
     # Relationships
     category = relationship("Category", back_populates="products")
-    variants = relationship("ProductVariant", back_populates="product", cascade="all, delete-orphan", order_by="ProductVariant.sort_order")
-    images = relationship("ProductImage", back_populates="product", cascade="all, delete-orphan", order_by="ProductImage.sort_order")
+    variants = relationship("ProductVariant", back_populates="product", cascade="all, delete-orphan", order_by="ProductVariant.sort_order", lazy="selectin")
+    images = relationship("ProductImage", back_populates="product", cascade="all, delete-orphan", order_by="ProductImage.sort_order", lazy="selectin")
     nutrition = relationship("ProductNutrition", back_populates="product", uselist=False, cascade="all, delete-orphan")
     reviews = relationship("Review", back_populates="product", cascade="all, delete-orphan")
     cart_items = relationship("CartItem", back_populates="product")
@@ -103,7 +103,7 @@ class ProductVariant(Base):
     __tablename__ = "product_variants"
 
     id = Column(Integer, primary_key=True, index=True)
-    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
     sku = Column(String(50), unique=True, nullable=True, index=True)
     format = Column(String(20), nullable=False)  # '100g', '200g', '1kg'
     weight_grams = Column(Integer, nullable=False)
@@ -128,6 +128,7 @@ class ProductVariant(Base):
         back_populates="variant",
         order_by="ProductImage.sort_order",
         foreign_keys="ProductImage.variant_id",
+        lazy="selectin",
     )
     cart_items = relationship("CartItem", back_populates="variant")
     order_items = relationship("OrderItem", back_populates="variant")

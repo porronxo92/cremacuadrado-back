@@ -133,7 +133,7 @@ def cart_to_response(cart: Cart, db: Session) -> CartResponse:
 
 
 @router.get("", response_model=CartResponse)
-async def get_cart(
+def get_cart(
     db: DbSession,
     current_user: CurrentUserOptional,
     response: Response,
@@ -152,7 +152,7 @@ async def get_cart(
 
 
 @router.post("/items", response_model=CartResponse, status_code=status.HTTP_201_CREATED)
-async def add_to_cart(
+def add_to_cart(
     item_data: CartItemCreate,
     db: DbSession,
     current_user: CurrentUserOptional,
@@ -219,7 +219,7 @@ async def add_to_cart(
 
 
 @router.put("/items/{item_id}", response_model=CartResponse)
-async def update_cart_item(
+def update_cart_item(
     item_id: int,
     item_data: CartItemUpdate,
     db: DbSession,
@@ -250,7 +250,7 @@ async def update_cart_item(
 
 
 @router.delete("/items/{item_id}", response_model=CartResponse)
-async def remove_cart_item(
+def remove_cart_item(
     item_id: int,
     db: DbSession,
     current_user: CurrentUserOptional,
@@ -272,7 +272,7 @@ async def remove_cart_item(
 
 
 @router.delete("", response_model=Message)
-async def clear_cart(
+def clear_cart(
     db: DbSession,
     current_user: CurrentUserOptional,
     cart_session: Optional[str] = Cookie(None),
@@ -287,7 +287,7 @@ async def clear_cart(
 
 
 @router.post("/apply-coupon", response_model=CartResponse)
-async def apply_coupon(
+def apply_coupon(
     coupon_data: ApplyCoupon,
     db: DbSession,
     current_user: CurrentUserOptional,
@@ -317,7 +317,7 @@ async def apply_coupon(
 
 
 @router.delete("/remove-coupon", response_model=CartResponse)
-async def remove_coupon(
+def remove_coupon(
     db: DbSession,
     current_user: CurrentUserOptional,
     cart_session: Optional[str] = Cookie(None),

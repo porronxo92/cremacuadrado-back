@@ -4,6 +4,7 @@ Products API endpoints.
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import DbSession, CurrentUser, CurrentUserOptional
@@ -37,7 +38,24 @@ def _variant_response(v: ProductVariant) -> ProductVariantResponse:
     )
 
 
-def _product_to_list_response(product: Product) -> ProductListResponse:
+def _get_review_stats(db: Session, product_ids: list[int]) -> dict[int, tuple]:
+    """Single aggregated query for avg_rating and review_count. Replaces loading all review rows."""
+    if not product_ids:
+        return {}
+    rows = db.query(
+        Review.product_id,
+        func.avg(Review.rating).label("avg_rating"),
+        func.count(Review.id).label("cnt"),
+    ).filter(
+        Review.product_id.in_(product_ids),
+        Review.status == "approved",
+    ).group_by(Review.product_id).all()
+    return {row.product_id: (float(row.avg_rating), int(row.cnt)) for row in rows}
+
+
+def _product_to_list_response(
+    product: Product, avg_rating: float | None = None, review_count: int = 0
+) -> ProductListResponse:
     return ProductListResponse(
         id=product.id,
         sku=product.sku,
@@ -50,22 +68,21 @@ def _product_to_list_response(product: Product) -> ProductListResponse:
         primary_image=normalize_image_url(product.primary_image),
         category_slug=product.category.slug if product.category else None,
         variants=[_variant_response(v) for v in product.variants if v.is_active],
-        average_rating=product.average_rating,
-        review_count=product.review_count,
+        average_rating=avg_rating,
+        review_count=review_count,
     )
 
 
-def _load_product_query(db: Session):
+def _load_product_list_query(db: Session):
+    """Query for list views. No reviews joinedload — aggregates computed via _get_review_stats."""
     return db.query(Product).options(
-        joinedload(Product.variants).joinedload(ProductVariant.images),
-        joinedload(Product.images),
         joinedload(Product.category),
-        joinedload(Product.reviews),
+        # variants and images use lazy="selectin" defined in the model
     )
 
 
 @router.get("", response_model=PaginatedResponse[ProductListResponse])
-async def list_products(
+def list_products(
     db: DbSession,
     page: int = Query(1, ge=1),
     page_size: int = Query(settings.DEFAULT_PAGE_SIZE, ge=1, le=settings.MAX_PAGE_SIZE),
@@ -76,8 +93,8 @@ async def list_products(
     sort_by: str = Query("created_at", pattern="^(name|created_at)$"),
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
 ):
-    """List products with their variants. Two products: Pura and Crunchy."""
-    query = _load_product_query(db).filter(Product.is_active == True)
+    """List products with their variants."""
+    query = _load_product_list_query(db).filter(Product.is_active == True)
 
     if category:
         query = query.join(Category).filter(Category.slug == category)
@@ -101,13 +118,16 @@ async def list_products(
         products = [p for p in products if p.is_in_stock]
         total = len(products)
 
+    review_stats = _get_review_stats(db, [p.id for p in products])
+
     return PaginatedResponse.create(
-        [_product_to_list_response(p) for p in products], total, page, page_size
+        [_product_to_list_response(p, *review_stats.get(p.id, (None, 0))) for p in products],
+        total, page, page_size
     )
 
 
 @router.get("/categories", response_model=List[CategoryResponse])
-async def list_categories(db: DbSession, include_empty: bool = False):
+def list_categories(db: DbSession, include_empty: bool = False):
     """List active product categories."""
     query = db.query(Category).filter(Category.is_active == True)
     if not include_empty:
@@ -116,18 +136,19 @@ async def list_categories(db: DbSession, include_empty: bool = False):
 
 
 @router.get("/featured", response_model=List[ProductListResponse])
-async def list_featured_products(db: DbSession, limit: int = Query(4, ge=1, le=10)):
+def list_featured_products(db: DbSession, limit: int = Query(4, ge=1, le=10)):
     """Get featured products for homepage."""
-    products = _load_product_query(db).filter(
+    products = _load_product_list_query(db).filter(
         Product.is_active == True,
         Product.is_featured == True,
     ).limit(limit).all()
-    return [_product_to_list_response(p) for p in products]
+    review_stats = _get_review_stats(db, [p.id for p in products])
+    return [_product_to_list_response(p, *review_stats.get(p.id, (None, 0))) for p in products]
 
 
 @router.get("/{slug}", response_model=ProductResponse)
-async def get_product(slug: str, db: DbSession):
-    """Get full product detail including all variants."""
+def get_product(slug: str, db: DbSession):
+    """Get full product detail including all variants and reviews."""
     product = db.query(Product).options(
         joinedload(Product.variants).joinedload(ProductVariant.images),
         joinedload(Product.images),
@@ -167,7 +188,7 @@ async def get_product(slug: str, db: DbSession):
 
 
 @router.get("/{slug}/reviews", response_model=List[ReviewResponse])
-async def get_product_reviews(slug: str, db: DbSession):
+def get_product_reviews(slug: str, db: DbSession):
     """Get approved reviews for a product."""
     product = db.query(Product).filter(Product.slug == slug).first()
     if not product:
@@ -197,7 +218,7 @@ async def get_product_reviews(slug: str, db: DbSession):
 
 
 @router.post("/{slug}/reviews", response_model=ReviewResponse, status_code=status.HTTP_201_CREATED)
-async def create_review(slug: str, review_data: ReviewCreate, db: DbSession, current_user: CurrentUser):
+def create_review(slug: str, review_data: ReviewCreate, db: DbSession, current_user: CurrentUser):
     """Create a review for a product (authenticated users only)."""
     product = db.query(Product).filter(Product.slug == slug).first()
     if not product:
@@ -210,6 +231,7 @@ async def create_review(slug: str, review_data: ReviewCreate, db: DbSession, cur
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ya has dejado una reseña para este producto")
 
+    # order_items.product_id now has an index — this join is fast
     has_purchased = db.query(OrderItem).join(OrderItem.order).filter(
         OrderItem.product_id == product.id,
         OrderItem.order.has(user_id=current_user.id),

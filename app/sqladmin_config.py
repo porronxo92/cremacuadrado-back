@@ -65,6 +65,21 @@ def _img_col(url: str | None) -> Markup:
         f'white-space:nowrap;color:#888;font-size:0.7em;">{url.split("/")[-1]}</small>'
     )
 
+
+def _safe_product_thumb(m) -> Markup:
+    try:
+        return _img_col(m.primary_image)
+    except Exception:
+        return Markup('<span style="color:#ccc">—</span>')
+
+
+def _safe_variant_thumb(m) -> Markup:
+    try:
+        imgs = m.images
+        return _img_col(imgs[0].url if imgs else None)
+    except Exception:
+        return Markup('<span style="color:#ccc">—</span>')
+
 from app.models.user import User, Address, PasswordResetToken
 from app.models.product import (
     Category, Product, ProductVariant,
@@ -208,7 +223,7 @@ class ProductAdmin(ModelView, model=Product):
     ]
     column_default_sort = [(Product.created_at, True)]
     column_formatters = {
-        "thumb": lambda m, a: _img_col(m.primary_image),
+        "thumb": lambda m, a: _safe_product_thumb(m),
     }
 
     form_excluded_columns = [
@@ -248,7 +263,7 @@ class ProductVariantAdmin(ModelView, model=ProductVariant):
         ProductVariant.sort_order, ProductVariant.is_active,
     ]
     column_formatters = {
-        "thumb": lambda m, a: _img_col(m.images[0].url if m.images else None),
+        "thumb": lambda m, a: _safe_variant_thumb(m),
     }
 
     # "images" se incluye en el formulario para poder asociar imágenes existentes

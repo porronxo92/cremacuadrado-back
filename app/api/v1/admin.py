@@ -86,7 +86,7 @@ def _product_response(product: Product) -> ProductResponse:
 # =============================================================================
 
 @router.get("/dashboard", response_model=DashboardStats)
-async def get_dashboard(db: DbSession, admin_user: AdminUser):
+def get_dashboard(db: DbSession, admin_user: AdminUser):
     """Get dashboard statistics."""
     today = datetime.now(timezone.utc).date()
     today_start = datetime.combine(today, datetime.min.time())
@@ -187,7 +187,7 @@ async def get_dashboard(db: DbSession, admin_user: AdminUser):
 # =============================================================================
 
 @router.get("/orders", response_model=PaginatedResponse[OrderResponse])
-async def list_all_orders(
+def list_all_orders(
     db: DbSession,
     admin_user: AdminUser,
     page: int = Query(1, ge=1),
@@ -259,7 +259,7 @@ async def list_all_orders(
 
 
 @router.get("/orders/{order_id}", response_model=OrderResponse)
-async def get_order_admin(order_id: int, db: DbSession, admin_user: AdminUser):
+def get_order_admin(order_id: int, db: DbSession, admin_user: AdminUser):
     """Get order details (admin)."""
     order = db.query(Order).options(
         joinedload(Order.items),
@@ -297,7 +297,7 @@ async def get_order_admin(order_id: int, db: DbSession, admin_user: AdminUser):
 
 
 @router.put("/orders/{order_id}/status", response_model=OrderResponse)
-async def update_order_status(
+def update_order_status(
     order_id: int,
     status_data: OrderStatusUpdate,
     db: DbSession,
@@ -381,7 +381,7 @@ async def update_order_status(
 
 
 @router.get("/orders/export/csv")
-async def export_orders_csv(
+def export_orders_csv(
     db: DbSession,
     admin_user: AdminUser,
     date_from: Optional[datetime] = None,
@@ -458,7 +458,7 @@ async def export_orders_csv(
 # =============================================================================
 
 @router.get("/products", response_model=PaginatedResponse[ProductResponse])
-async def list_products_admin(
+def list_products_admin(
     db: DbSession,
     admin_user: AdminUser,
     page: int = Query(1, ge=1),
@@ -473,7 +473,6 @@ async def list_products_admin(
         joinedload(Product.images),
         joinedload(Product.category),
         joinedload(Product.nutrition),
-        joinedload(Product.reviews),
     )
 
     if not include_inactive:
@@ -494,13 +493,40 @@ async def list_products_admin(
     offset = (page - 1) * page_size
     products = query.offset(offset).limit(page_size).all()
 
-    items = [_product_response(p) for p in products]
+    from app.models.product import Review as ReviewModel
+    from sqlalchemy import func
+    product_ids = [p.id for p in products]
+    review_stats = {}
+    if product_ids:
+        rows = db.query(
+            ReviewModel.product_id,
+            func.avg(ReviewModel.rating).label("avg"),
+            func.count(ReviewModel.id).label("cnt"),
+        ).filter(
+            ReviewModel.product_id.in_(product_ids),
+            ReviewModel.status == "approved",
+        ).group_by(ReviewModel.product_id).all()
+        review_stats = {r.product_id: (float(r.avg), int(r.cnt)) for r in rows}
 
+    def _product_resp_with_stats(p: Product) -> ProductResponse:
+        avg, cnt = review_stats.get(p.id, (None, 0))
+        product_level_images = [img for img in p.images if img.variant_id is None]
+        return ProductResponse(
+            id=p.id, sku=p.sku, slug=p.slug, name=p.name,
+            short_description=p.short_description, description=p.description,
+            badge_color=p.badge_color, is_active=p.is_active, is_featured=p.is_featured,
+            is_in_stock=p.is_in_stock, category=p.category, images=product_level_images,
+            nutrition=p.nutrition, variants=[_variant_resp(v) for v in p.variants],
+            average_rating=avg, review_count=cnt,
+            created_at=p.created_at, updated_at=p.updated_at,
+        )
+
+    items = [_product_resp_with_stats(p) for p in products]
     return PaginatedResponse.create(items, total, page, page_size)
 
 
 @router.post("/products", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
-async def create_product(
+def create_product(
     product_data: dict,
     db: DbSession,
     admin_user: AdminUser
@@ -527,7 +553,7 @@ async def create_product(
 
 
 @router.put("/products/{product_id}", response_model=ProductResponse)
-async def update_product(
+def update_product(
     product_id: int,
     product_data: dict,
     db: DbSession,
@@ -561,7 +587,7 @@ async def update_product(
 
 
 @router.delete("/products/{product_id}", response_model=Message)
-async def delete_product(
+def delete_product(
     product_id: int,
     db: DbSession,
     admin_user: AdminUser
@@ -625,7 +651,7 @@ async def upload_image(
 
 
 @router.put("/products/{product_id}/variants/{variant_id}", response_model=ProductVariantResponse)
-async def update_variant(
+def update_variant(
     product_id: int,
     variant_id: int,
     variant_data: dict,
@@ -671,15 +697,23 @@ async def update_variant(
 # Review Management
 # =============================================================================
 
-@router.get("/reviews/pending", response_model=List[dict])
-async def list_pending_reviews(db: DbSession, admin_user: AdminUser):
+@router.get("/reviews/pending", response_model=PaginatedResponse[dict])
+def list_pending_reviews(
+    db: DbSession,
+    admin_user: AdminUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
     """List pending reviews for moderation."""
-    reviews = db.query(Review).options(
+    query = db.query(Review).options(
         joinedload(Review.product),
         joinedload(Review.user)
-    ).filter(Review.status == "pending").order_by(Review.created_at.desc()).all()
-    
-    return [
+    ).filter(Review.status == "pending").order_by(Review.created_at.desc())
+
+    total = query.count()
+    reviews = query.offset((page - 1) * page_size).limit(page_size).all()
+
+    items = [
         {
             "id": r.id,
             "product_name": r.product.name if r.product else "N/A",
@@ -692,10 +726,11 @@ async def list_pending_reviews(db: DbSession, admin_user: AdminUser):
         }
         for r in reviews
     ]
+    return PaginatedResponse.create(items, total, page, page_size)
 
 
 @router.put("/reviews/{review_id}/approve", response_model=Message)
-async def approve_review(review_id: int, db: DbSession, admin_user: AdminUser):
+def approve_review(review_id: int, db: DbSession, admin_user: AdminUser):
     """Approve a review."""
     review = db.query(Review).filter(Review.id == review_id).first()
     if not review:
@@ -707,7 +742,7 @@ async def approve_review(review_id: int, db: DbSession, admin_user: AdminUser):
 
 
 @router.put("/reviews/{review_id}/reject", response_model=Message)
-async def reject_review(review_id: int, db: DbSession, admin_user: AdminUser):
+def reject_review(review_id: int, db: DbSession, admin_user: AdminUser):
     """Reject a review."""
     review = db.query(Review).filter(Review.id == review_id).first()
     if not review:
