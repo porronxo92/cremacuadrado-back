@@ -8,7 +8,7 @@ from datetime import datetime
 
 import stripe as stripe_lib
 
-from fastapi import APIRouter, Depends, HTTPException, Cookie, status
+from fastapi import APIRouter, Depends, HTTPException, Cookie, Header, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import DbSession, CurrentUserOptional
@@ -33,7 +33,7 @@ async def get_shipping_cost(
     db: DbSession,
     current_user: CurrentUserOptional,
     cart_session: Optional[str] = Cookie(None),
-    x_cart_session: Optional[str] = None,
+    x_cart_session: Optional[str] = Header(None, alias="X-Cart-Session"),
 ):
     """Calculate shipping cost for current cart."""
     session_id = cart_session or x_cart_session
@@ -87,7 +87,7 @@ async def validate_checkout(
     db: DbSession,
     current_user: CurrentUserOptional,
     cart_session: Optional[str] = Cookie(None),
-    x_cart_session: Optional[str] = None,
+    x_cart_session: Optional[str] = Header(None, alias="X-Cart-Session"),
 ):
     """Validate cart and checkout data before payment."""
     session_id = cart_session or x_cart_session
@@ -178,7 +178,7 @@ async def create_payment_intent(
     db: DbSession,
     current_user: CurrentUserOptional,
     cart_session: Optional[str] = Cookie(None),
-    x_cart_session: Optional[str] = None,
+    x_cart_session: Optional[str] = Header(None, alias="X-Cart-Session"),
 ):
     """
     Create Stripe PaymentIntent, persist a pending order, and return client_secret.
