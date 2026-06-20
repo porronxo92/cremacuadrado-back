@@ -9,7 +9,6 @@ import io
 
 import os
 import re
-import shutil
 import uuid as _uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, status
@@ -26,6 +25,7 @@ from app.schemas.product import ProductResponse, ProductVariantResponse
 from app.schemas.admin import DashboardStats
 from app.schemas.common import Message, PaginatedResponse
 from app.services.email import EmailService
+from app.services import blob_service
 from app.config import settings
 
 router = APIRouter()
@@ -35,12 +35,11 @@ VALID_ORDER_STATUSES = {
     "processing", "shipped", "delivered", "cancelled", "refunded",
 }
 
-_STATIC_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "..", "static")
-_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".avif"}
+_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".avif", ".gif"}
 
 
 def _safe_dest(dest_path: str) -> str:
-    """Resolve dest_path relative to static/images/, reject traversal attempts."""
+    """Sanitize dest_path and reject traversal attempts."""
     clean = re.sub(r"[^a-zA-Z0-9 _\-/.]", "", dest_path).strip("/")
     if ".." in clean:
         raise HTTPException(status_code=400, detail="Ruta no permitida")
@@ -619,8 +618,8 @@ async def upload_image(
     dest_path: str = Form(...),
 ):
     """
-    Upload an image file and save it under static/images/{dest_path}/.
-    Returns the public URL for the saved file.
+    Upload an image to Vercel Blob under images/{dest_path}/.
+    Returns the public CDN URL.
 
     dest_path examples:
       "products/Crema Pistacho Pura/200gr"
@@ -635,18 +634,16 @@ async def upload_image(
         )
 
     clean_path = _safe_dest(dest_path)
-    target_dir = os.path.join(_STATIC_ROOT, "images", clean_path)
-    os.makedirs(target_dir, exist_ok=True)
-
-    # Preserve original name but sanitize it; add uuid prefix to avoid collisions
     safe_name = re.sub(r"[^a-zA-Z0-9._\-]", "_", os.path.basename(file.filename or "file"))
     filename = f"{_uuid.uuid4().hex[:8]}_{safe_name}"
-    dest_file = os.path.join(target_dir, filename)
+    pathname = f"images/{clean_path}/{filename}"
 
-    with open(dest_file, "wb") as out:
-        shutil.copyfileobj(file.file, out)
+    content = await file.read()
+    try:
+        public_url = await blob_service.upload(content, pathname)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error subiendo imagen: {exc}")
 
-    public_url = f"/static/images/{clean_path}/{filename}"
     return {"url": public_url, "filename": filename}
 
 

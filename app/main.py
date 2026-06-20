@@ -6,7 +6,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import os
 import re
-import shutil
 from uuid import uuid4
 
 from fastapi import FastAPI, Request, UploadFile, File, Form
@@ -22,6 +21,7 @@ from sqladmin import Admin
 
 from app.config import settings
 from app.limiter import limiter
+from app.services import blob_service
 from app.api.v1 import router as api_v1_router
 from app.models.database import engine, Base
 from app.sqladmin_config import (
@@ -210,8 +210,8 @@ if static_path.exists():
     app.mount("/static", CachedStaticFiles(directory=str(static_path)), name="static")
 
 
-_ADMIN_STATIC_ROOT = os.path.join(os.path.dirname(__file__), "..", "static")
-_ADMIN_ALLOWED_EXT = {".jpg", ".jpeg", ".png"}
+_ADMIN_ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp"}
+_ADMIN_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 def _admin_safe_dest(dest_path: str) -> str:
@@ -227,14 +227,14 @@ async def admin_upload(
     file: UploadFile = File(...),
     dest_path: str = Form("misc"),
 ):
-    """Upload an image from the SQLAdmin panel (session-authenticated, jpg/png only)."""
+    """Upload an image from the SQLAdmin panel (session-authenticated) to Vercel Blob."""
     if request.session.get("token") != "authenticated":
         return JSONResponse({"error": "No autorizado"}, status_code=403)
 
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in _ADMIN_ALLOWED_EXT:
         return JSONResponse(
-            {"error": "Solo se permiten archivos .jpg y .png"},
+            {"error": f"Extensión no permitida. Usa: {', '.join(_ADMIN_ALLOWED_EXT)}"},
             status_code=400,
         )
 
@@ -243,30 +243,21 @@ async def admin_upload(
     except ValueError:
         return JSONResponse({"error": "Ruta no permitida"}, status_code=400)
 
-    target_dir = os.path.join(_ADMIN_STATIC_ROOT, "images", clean)
-    os.makedirs(target_dir, exist_ok=True)
+    # Read with 10 MB cap
+    content = await file.read(_ADMIN_MAX_BYTES + 1)
+    if len(content) > _ADMIN_MAX_BYTES:
+        return JSONResponse({"error": "El archivo supera el límite de 10 MB"}, status_code=413)
 
     safe_name = re.sub(r"[^a-zA-Z0-9._\-]", "_", os.path.basename(file.filename or "file"))
     filename = f"{uuid4().hex[:8]}_{safe_name}"
-    dest_file = os.path.join(target_dir, filename)
+    pathname = f"images/{clean}/{filename}"
 
-    # Stream to disk with 10 MB cap to prevent resource exhaustion
-    _max_bytes = 10 * 1024 * 1024
-    written = 0
-    chunk_size = 64 * 1024
-    with open(dest_file, "wb") as out:
-        while True:
-            chunk = await file.read(chunk_size)
-            if not chunk:
-                break
-            written += len(chunk)
-            if written > _max_bytes:
-                out.close()
-                os.remove(dest_file)
-                return JSONResponse({"error": "El archivo supera el límite de 10 MB"}, status_code=413)
-            out.write(chunk)
+    try:
+        url = await blob_service.upload(content, pathname)
+    except Exception as exc:
+        return JSONResponse({"error": f"Error subiendo imagen: {exc}"}, status_code=500)
 
-    return {"url": f"/static/images/{clean}/{filename}", "filename": filename}
+    return {"url": url, "filename": filename}
 
 
 @app.middleware("http")

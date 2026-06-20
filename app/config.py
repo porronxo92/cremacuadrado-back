@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     # Ghost order cleanup — cancel pending_payment orders older than this (minutes)
     PENDING_ORDER_EXPIRE_MINUTES: int = 30
 
+    # Vercel Blob — public store for product/blog images
+    BLOB_PUBLIC_READ_WRITE_TOKEN: str = ""
+
     # Security headers
     SECURE_HEADERS: bool = True  # Set False only for local dev if needed
 
