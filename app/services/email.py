@@ -2,8 +2,8 @@
 Email service — SMTP with inline-CSS HTML templates.
 Set EMAIL_ENABLED=True in .env and configure SMTP_* variables to send real emails.
 """
+import logging
 import smtplib
-import traceback
 from datetime import datetime
 from decimal import Decimal
 from email.mime.multipart import MIMEMultipart
@@ -11,6 +11,8 @@ from email.mime.text import MIMEText
 from typing import Optional
 
 from app.config import settings
+
+logger = logging.getLogger("cremacuadrado.email")
 
 
 # ---------------------------------------------------------------------------
@@ -21,11 +23,7 @@ def _send(to_email: str, subject: str, html: str, text: str = "") -> bool:
     sender = f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM}>"
 
     if not settings.EMAIL_ENABLED:
-        print("=" * 70)
-        print(f"EMAIL (not sent -- set EMAIL_ENABLED=True in .env)")
-        print(f"   To: {to_email}")
-        print(f"   Subject: {subject}")
-        print("=" * 70)
+        logger.info("Email suppressed (EMAIL_ENABLED=False) to=%s subject=%r", to_email, subject)
         return True
 
     try:
@@ -42,9 +40,11 @@ def _send(to_email: str, subject: str, html: str, text: str = "") -> bool:
             server.starttls()
             server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
             server.sendmail(settings.EMAIL_FROM, [to_email], msg.as_string())
+
+        logger.info("Email sent to=%s subject=%r", to_email, subject)
         return True
     except Exception:
-        traceback.print_exc()
+        logger.error("Email failed to=%s subject=%r", to_email, subject, exc_info=True)
         return False
 
 

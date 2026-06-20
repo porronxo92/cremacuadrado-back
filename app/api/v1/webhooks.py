@@ -3,6 +3,7 @@ Stripe webhook handler.
 Receives payment events from Stripe and updates order state canonically.
 """
 import json
+import logging
 from datetime import datetime, timezone
 
 import stripe
@@ -11,6 +12,8 @@ from fastapi import APIRouter, Request, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import DbSession
+
+logger = logging.getLogger("cremacuadrado.webhooks")
 from app.models.order import Order, OrderItem, Coupon
 from app.models.cart import Cart, CartItem
 from app.models.payment import PaymentIntent as PaymentIntentModel, StripeWebhookEvent
@@ -41,6 +44,7 @@ async def stripe_webhook(request: Request, db: DbSession):
     try:
         event = stripe_service.verify_webhook_signature(payload_bytes, sig_header)
     except (stripe.error.SignatureVerificationError, RuntimeError) as exc:
+        logger.warning("Stripe webhook signature invalid: %s", exc)
         raise HTTPException(status_code=400, detail=f"Invalid webhook signature: {exc}")
 
     event_id: str = event["id"]
@@ -78,10 +82,12 @@ async def stripe_webhook(request: Request, db: DbSession):
 
     # 5. Dispatch to handler
     if event_type not in HANDLED_EVENTS:
+        logger.debug("Stripe event ignored: %s id=%s", event_type, event_id)
         return {"status": "ignored"}
 
+    logger.info("Stripe event received: %s id=%s", event_type, event_id)
+
     try:
-        # event["data"]["object"] is a StripeObject (dict-like) — primitives are plain Python types
         data: dict = event["data"]["object"]
 
         if event_type == "payment_intent.succeeded":
@@ -96,11 +102,16 @@ async def stripe_webhook(request: Request, db: DbSession):
         existing.processed = True
         existing.processed_at = datetime.now(timezone.utc)
         db.commit()
+        logger.info("Stripe event processed: %s id=%s", event_type, event_id)
         return {"status": "ok"}
 
     except Exception as exc:
         db.rollback()
-        # Log the error in a fresh transaction so we know what went wrong
+        logger.error(
+            "Stripe event handler failed: %s id=%s error=%s",
+            event_type, event_id, exc,
+            exc_info=True,
+        )
         try:
             failed_event = db.query(StripeWebhookEvent).filter(
                 StripeWebhookEvent.stripe_event_id == event_id
@@ -110,7 +121,6 @@ async def stripe_webhook(request: Request, db: DbSession):
                 db.commit()
         except Exception:
             pass
-        # Return 200 so Stripe doesn't keep retrying — error is visible in stripe_webhook_events
         return {"status": "error_logged", "detail": str(exc)}
 
 
@@ -142,7 +152,10 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
     stripe_pi_id = data["id"]
     order = _get_order_by_pi(db, stripe_pi_id)
     if not order or order.status == "paid":
+        logger.info("payment_intent.succeeded skipped pi=%s (order already paid or not found)", stripe_pi_id)
         return
+
+    logger.info("Order paid: order=%s pi=%s total=%s", order.order_number, stripe_pi_id, order.total)
 
     # Mark order paid
     order.status = "paid"
@@ -215,6 +228,7 @@ def _handle_payment_failed(db: Session, data: dict) -> None:
     order = _get_order_by_pi(db, stripe_pi_id)
     if order and order.status == "pending_payment":
         order.status = "payment_failed"
+        logger.warning("Payment failed: order=%s pi=%s", order.order_number, stripe_pi_id)
     _update_pi_status(db, stripe_pi_id, "requires_payment_method")
 
 
@@ -223,4 +237,5 @@ def _handle_payment_canceled(db: Session, data: dict) -> None:
     order = _get_order_by_pi(db, stripe_pi_id)
     if order and order.status in ("pending_payment", "payment_failed"):
         order.status = "cancelled"
+        logger.info("Payment canceled: order=%s pi=%s", order.order_number, stripe_pi_id)
     _update_pi_status(db, stripe_pi_id, "canceled")

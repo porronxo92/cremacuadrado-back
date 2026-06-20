@@ -4,8 +4,11 @@ Cremacuadrado API - FastAPI Application Entry Point
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import logging
 import os
 import re
+import time
+import uuid as _uuid_mod
 from uuid import uuid4
 
 from fastapi import FastAPI, Request, UploadFile, File, Form
@@ -20,8 +23,12 @@ from starlette.middleware.sessions import SessionMiddleware
 from sqladmin import Admin
 
 from app.config import settings
+from app.logging_config import setup_logging, request_id_ctx
 from app.limiter import limiter
 from app.services import blob_service
+
+setup_logging(debug=settings.DEBUG)
+logger = logging.getLogger("cremacuadrado")
 from app.api.v1 import router as api_v1_router
 from app.models.database import engine, Base
 from app.sqladmin_config import (
@@ -52,6 +59,7 @@ def _cancel_ghost_orders() -> None:
     """Cancel pending_payment orders that have been waiting longer than the configured threshold."""
     from app.models.order import Order
     from app.models.database import SessionLocal
+    _log = logging.getLogger("cremacuadrado.scheduler")
     db = SessionLocal()
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.PENDING_ORDER_EXPIRE_MINUTES)
@@ -63,10 +71,10 @@ def _cancel_ghost_orders() -> None:
             for order in expired:
                 order.status = "cancelled"
             db.commit()
-            print(f"[cleanup] Cancelled {len(expired)} ghost order(s)")
+            _log.info("Ghost orders cancelled", extra={"count": len(expired)})
     except Exception as exc:
         db.rollback()
-        print(f"[cleanup] Error cancelling ghost orders: {exc}")
+        _log.error("Ghost order cleanup failed: %s", exc, exc_info=True)
     finally:
         db.close()
 
@@ -74,22 +82,21 @@ def _cancel_ghost_orders() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
-    print(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
+    logger.info("%s v%s starting", settings.APP_NAME, settings.APP_VERSION)
 
-    # Start background scheduler for ghost order cleanup (skipped on serverless)
     try:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         scheduler = AsyncIOScheduler()
         scheduler.add_job(_cancel_ghost_orders, "interval", minutes=5, id="ghost_order_cleanup")
         scheduler.start()
-        print("[scheduler] Ghost order cleanup running every 5 minutes")
+        logger.info("Scheduler started — ghost order cleanup every 5 min")
         yield
         scheduler.shutdown(wait=False)
     except Exception as exc:
-        print(f"[scheduler] Could not start (serverless?): {exc}")
+        logger.warning("Scheduler could not start (serverless?): %s", exc)
         yield
 
-    print("Shutting down...")
+    logger.info("Shutting down")
 
 
 app = FastAPI(
@@ -163,6 +170,78 @@ app.add_middleware(
     https_only=not settings.DEBUG,       # cookie segura en producción
     same_site="lax",
 )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error(
+        "Unhandled exception: %s %s → %s",
+        request.method, request.url.path, exc,
+        exc_info=True,
+        extra={
+            "method": request.method,
+            "path": request.url.path,
+            "client_ip": request.client.host if request.client else "-",
+        },
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Error interno del servidor"},
+    )
+
+
+_SKIP_LOG_PATHS = {"/health", "/"}
+
+
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    """Log every request with method, path, status, duration and a unique ID."""
+    rid = _uuid_mod.uuid4().hex[:12]
+    token = request_id_ctx.set(rid)
+
+    start = time.perf_counter()
+    path  = request.url.path
+    method = request.method
+    client_ip = request.client.host if request.client else "-"
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        request_id_ctx.reset(token)
+        raise
+
+    duration_ms = round((time.perf_counter() - start) * 1000)
+    status = response.status_code
+
+    if path not in _SKIP_LOG_PATHS:
+        extra = {
+            "method": method,
+            "path": path,
+            "status_code": status,
+            "duration_ms": duration_ms,
+            "client_ip": client_ip,
+        }
+        if status >= 500:
+            level = logging.ERROR
+        elif status >= 400:
+            level = logging.WARNING
+        elif duration_ms >= 3_000:
+            level = logging.ERROR
+        elif duration_ms >= 1_000:
+            level = logging.WARNING
+        else:
+            level = logging.INFO
+
+        logging.getLogger("cremacuadrado.http").log(
+            level,
+            "%s %s %s %dms",
+            method, path, status, duration_ms,
+            extra=extra,
+        )
+
+    response.headers["X-Request-ID"] = rid
+    request_id_ctx.reset(token)
+    return response
 
 
 @app.middleware("http")

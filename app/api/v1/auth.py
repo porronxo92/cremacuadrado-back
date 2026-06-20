@@ -1,6 +1,7 @@
 """
 Authentication API endpoints.
 """
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -8,6 +9,8 @@ from jose import JWTError, jwt
 
 from app.api.deps import DbSession, CurrentUser
 from app.limiter import limiter
+
+logger = logging.getLogger("cremacuadrado.auth")
 from app.models.user import User, PasswordResetToken
 from app.schemas.user import (
     UserCreate, UserLogin, UserResponse, Token,
@@ -31,6 +34,7 @@ async def register(request: Request, user_data: UserCreate, db: DbSession):
     """Register a new user account."""
     existing_user = db.query(User).filter(User.email == user_data.email.lower()).first()
     if existing_user:
+        logger.warning("Register rejected — email already exists: %s", user_data.email.lower())
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Ya existe una cuenta con este email"
@@ -49,6 +53,7 @@ async def register(request: Request, user_data: UserCreate, db: DbSession):
     db.commit()
     db.refresh(user)
 
+    logger.info("New user registered: email=%s", user.email)
     EmailService.send_welcome_email(user.email, user.first_name)
 
     return user
@@ -61,17 +66,20 @@ async def login(request: Request, credentials: UserLogin, db: DbSession):
     user = db.query(User).filter(User.email == credentials.email.lower()).first()
 
     if not user or not user.password_hash or not verify_password(credentials.password, user.password_hash):
+        logger.warning("Login failed — bad credentials: email=%s", credentials.email.lower())
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email o contraseña incorrectos"
         )
 
     if not user.is_active:
+        logger.warning("Login rejected — inactive account: email=%s", user.email)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cuenta desactivada"
         )
 
+    logger.info("Login success: email=%s role=%s", user.email, user.role)
     token_version = getattr(user, "token_version", 0)
     access_token = create_access_token(user.id, token_version)
     refresh_token = create_refresh_token(user.id, token_version)

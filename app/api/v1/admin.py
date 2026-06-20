@@ -7,9 +7,12 @@ from typing import List, Optional
 import csv
 import io
 
+import logging
 import os
 import re
 import uuid as _uuid
+
+logger = logging.getLogger("cremacuadrado.admin")
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, status
 from fastapi.responses import StreamingResponse
@@ -642,8 +645,10 @@ async def upload_image(
     try:
         public_url = await blob_service.upload(content, pathname)
     except Exception as exc:
+        logger.error("Image upload failed: pathname=%s error=%s", pathname, exc, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error subiendo imagen: {exc}")
 
+    logger.info("Image uploaded: pathname=%s size=%d url=%s", pathname, len(content), public_url)
     return {"url": public_url, "filename": filename}
 
 
