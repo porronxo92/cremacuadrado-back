@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
-    SITE_URL: str = "https://cremacuadrado-front.vercel.app"
+    SITE_URL: str = "http://localhost:4200"
     
     # Admin
     ADMIN_EMAIL: str = "admin@cremacuadrado.com"

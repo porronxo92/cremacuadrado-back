@@ -147,13 +147,10 @@ _sqladmin.add_view(BlogPostAdmin)
 if settings.ALLOWED_HOSTS != ["*"]:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
 
-# CORS Middleware
+# CORS Middleware — origins come from settings, never hardcoded here
 app.add_middleware(
     CORSMiddleware,
-    allow_origins = [
-    "https://cremacuadrado-front.vercel.app",
-    "http://localhost:4200"
-    ],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

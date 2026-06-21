@@ -207,7 +207,7 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
             }
             for i in order_with_items.items
         ]
-        send_order_confirmation(OrderEmailData(
+        sent = send_order_confirmation(OrderEmailData(
             to_email=customer_email,
             customer_name=order.shipping_address.get("first_name", "Cliente"),
             order_number=order.order_number,
@@ -221,6 +221,10 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
             coupon_code=order.coupon_code,
             customer_notes=order.customer_notes,
         ))
+        if not sent:
+            logger.error("Confirmation email failed: order=%s to=%s", order.order_number, customer_email)
+    else:
+        logger.warning("No customer_email for order=%s (guest_email missing?)", order.order_number)
 
 
 def _handle_payment_failed(db: Session, data: dict) -> None:
