@@ -39,7 +39,7 @@ async def list_all_blobs() -> list[dict]:
                 BLOB_API,
                 params=params,
                 headers={
-                    "Authorization": f"Bearer {settings.BLOB_READ_WRITE_TOKEN}",
+                    "Authorization": f"Bearer {settings.BLOB_PUBLIC_READ_WRITE_TOKEN}",
                     "x-api-version": API_VERSION,
                 },
             )
@@ -142,8 +142,8 @@ def update_database(url_map: dict[str, str], dry_run: bool) -> None:
 
 
 async def main(dry_run: bool) -> None:
-    if not settings.BLOB_READ_WRITE_TOKEN:
-        print("ERROR: BLOB_READ_WRITE_TOKEN is not set in .env")
+    if not settings.BLOB_PUBLIC_READ_WRITE_TOKEN:
+        print("ERROR: BLOB_PUBLIC_READ_WRITE_TOKEN is not set in .env")
         sys.exit(1)
 
     print("Listing blobs from Vercel Blob...")
