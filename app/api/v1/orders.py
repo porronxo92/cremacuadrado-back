@@ -17,7 +17,7 @@ from app.config import settings
 router = APIRouter()
 
 
-@router.get("/", response_model=PaginatedResponse[OrderListResponse])
+@router.get("", response_model=PaginatedResponse[OrderListResponse])
 def list_orders(
     db: DbSession,
     current_user: CurrentUser,

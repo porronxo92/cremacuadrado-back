@@ -107,6 +107,7 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
     lifespan=lifespan,
+    redirect_slashes=False,
 )
 
 # Rate limiting — returns 429 Too Many Requests when limits are exceeded
