@@ -59,23 +59,29 @@ def build_url_map(blobs: list[dict]) -> dict[str, str]:
     Build mapping from old local URL patterns -> new blob URL.
 
     Old patterns in the DB can be:
-      /static/images/products/...
+      /images/products/...                                    ← blob pathname stored as relative
+      /static/images/products/...                            ← FastAPI static mount path
       http://localhost:8000/static/images/products/...
       https://cremacuadrado-back.vercel.app/static/images/products/...
+      https://cremacuadrado-back.vercel.app/images/products/... ← wrong absolute built from BASE_URL
     """
     url_map: dict[str, str] = {}
     for blob in blobs:
         pathname: str = blob["pathname"]   # e.g. images/products/Crema Pistacho Pura/...
         blob_url: str = blob["url"]
 
-        # Match /static/{pathname}
+        # Blob pathname stored directly as relative path (most common current case)
+        url_map[f"/{pathname}"] = blob_url
+
+        # FastAPI static mount path
         url_map[f"/static/{pathname}"] = blob_url
 
-        # Match with any known BASE_URL prefix
+        # Match with any known BASE_URL prefix (absolute variants)
         for prefix in [
             "http://localhost:8000",
             "https://cremacuadrado-back.vercel.app",
         ]:
+            url_map[f"{prefix}/{pathname}"] = blob_url
             url_map[f"{prefix}/static/{pathname}"] = blob_url
 
     return url_map

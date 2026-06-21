@@ -69,9 +69,12 @@ class Settings(BaseSettings):
     ADMIN_EMAIL: str = "admin@cremacuadrado.com"
     ADMIN_PASSWORD: str  # Required — set via .env, never hardcode
 
-    # Base URL for absolute image URLs (frontend production workaround)
-    # Leave empty for relative URLs; set to https://cremacuadrado-back.vercel.app in production
+    # Base URL for legacy /static/ image paths (leave empty in production — use BLOB_BASE_URL instead)
     BASE_URL: str = ""
+
+    # Public base URL for Vercel Blob images (the /images/... pathnames stored in the DB)
+    # e.g. https://r2azgdghbvayayn4.public.blob.vercel-storage.com
+    BLOB_BASE_URL: str = ""
 
     # Stripe
     STRIPE_SECRET_KEY: str = ""
