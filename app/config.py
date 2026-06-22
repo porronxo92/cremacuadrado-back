@@ -95,6 +95,26 @@ class Settings(BaseSettings):
     # Security headers
     SECURE_HEADERS: bool = True  # Set False only for local dev if needed
 
+    # Correos España — set CORREOS_ENABLED=True with a signed contract to call the real API.
+    # While False, shipment creation runs in mock mode (returns a fake localizador).
+    CORREOS_ENABLED: bool = False
+    CORREOS_CLIENT_ID: str = ""
+    CORREOS_CLIENT_SECRET: str = ""
+    CORREOS_NUM_CONTRATO: str = ""
+    CORREOS_NUM_SOLICITANTE: str = ""
+    CORREOS_OAUTH_URL: str = "https://apioauthcid.correos.es/cid/oauth2/v1/token"
+    CORREOS_API_BASE: str = "https://apicorp.correos.es"
+    CORREOS_SERVICE_CODE: str = "S0103"  # Paq Estándar (2–3 días hábiles)
+    CORREOS_DEFAULT_WEIGHT_GRAMS: int = 500  # fallback if variant weight is missing
+    # Remitente (datos de la tienda para el preregistro)
+    CORREOS_SENDER_NAME: str = "CremaCuadrado"
+    CORREOS_SENDER_ADDRESS: str = ""
+    CORREOS_SENDER_CITY: str = ""
+    CORREOS_SENDER_POSTAL_CODE: str = ""
+    CORREOS_SENDER_PROVINCE: str = ""
+    CORREOS_SENDER_PHONE: str = ""
+    CORREOS_SENDER_EMAIL: str = "info@cremacuadrado.com"
+
 
 @lru_cache
 def get_settings() -> Settings:

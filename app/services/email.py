@@ -137,6 +137,7 @@ class OrderEmailData:
         shipping_address: dict,
         coupon_code: Optional[str] = None,
         customer_notes: Optional[str] = None,
+        tracking_number: Optional[str] = None,
     ):
         self.to_email = to_email
         self.customer_name = customer_name
@@ -150,6 +151,7 @@ class OrderEmailData:
         self.shipping_address = shipping_address
         self.coupon_code = coupon_code
         self.customer_notes = customer_notes
+        self.tracking_number = tracking_number
 
 
 def send_order_confirmation(data: OrderEmailData) -> bool:
@@ -201,6 +203,29 @@ def send_order_confirmation(data: OrderEmailData) -> bool:
         addr.get("country", ""),
     ]
     addr_html = "<br>".join(line for line in addr_lines if line)
+
+    # Tracking (Correos) — present only when a localizador was generated
+    tracking_block = ""
+    info_text = (
+        "Estamos preparando tu pedido. Recibirás otro email en cuanto lo enviemos con el "
+        "número de seguimiento de Correos. El plazo de entrega habitual es de "
+        "<strong>2–4 días hábiles</strong>."
+    )
+    if data.tracking_number:
+        track_url = f"https://www.correos.es/es/es/herramientas/localizador/envios/detalle?tracking-number={data.tracking_number}"
+        tracking_block = f"""
+        <hr style="border:none;border-top:1px solid #E8E3D8;margin:32px 0;">
+        <p style="margin:0 0 12px;font-family:Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#6B6456;font-weight:600;">Seguimiento del envío</p>
+        <div style="padding:16px;background-color:#F4F1E9;border-radius:6px;text-align:center;">
+          <p style="margin:0 0 4px;font-family:Arial,sans-serif;font-size:12px;color:#6B6456;text-transform:uppercase;letter-spacing:1px;">Número de seguimiento Correos</p>
+          <p style="margin:0 0 12px;font-family:Arial,sans-serif;font-size:20px;font-weight:700;color:#1C1A14;letter-spacing:2px;">{data.tracking_number}</p>
+          {_btn(track_url, "Seguir en Correos")}
+        </div>"""
+        info_text = (
+            "Estamos preparando tu pedido. Puedes seguir su estado con el número de "
+            "seguimiento de arriba. El plazo de entrega habitual es de "
+            "<strong>2–4 días hábiles</strong>."
+        )
 
     # Notes
     notes_block = ""
@@ -277,14 +302,15 @@ def send_order_confirmation(data: OrderEmailData) -> bool:
         {addr_html}
       </p>
 
+      {tracking_block}
+
       {notes_block}
 
       <!-- Info box -->
       <div style="margin-top:32px;padding:20px;background-color:#FFF9ED;border-radius:6px;border:1px solid #E6C15A;">
         <p style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:14px;font-weight:600;color:#1C1A14;">¿Qué pasa ahora?</p>
         <p style="margin:0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;line-height:1.6;">
-          Estamos preparando tu pedido. Recibirás otro email en cuanto lo enviemos con el número de seguimiento de Correos.
-          El plazo de entrega habitual es de <strong>2–4 días hábiles</strong>.
+          {info_text}
         </p>
       </div>
 

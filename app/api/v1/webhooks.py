@@ -195,6 +195,20 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
                 db.query(CartItem).filter(CartItem.cart_id == cart.id).delete()
                 cart.coupon_code = None
 
+    # Generate Correos shipment (defensive: must NOT break payment processing).
+    # In mock mode (CORREOS_ENABLED=False) this returns a fake localizador.
+    tracking_number = None
+    try:
+        from app.services.correos import create_shipment_for_order
+        shipment = create_shipment_for_order(db, order_with_items)
+        if shipment and shipment.localizador:
+            tracking_number = shipment.localizador
+    except Exception as exc:
+        logger.error(
+            "Correos shipment failed: order=%s error=%s",
+            order.order_number, exc, exc_info=True,
+        )
+
     # Send confirmation email with full order data
     customer_email = order.customer_email
     if customer_email:
@@ -220,6 +234,7 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
             shipping_address=order.shipping_address,
             coupon_code=order.coupon_code,
             customer_notes=order.customer_notes,
+            tracking_number=tracking_number,
         ))
         if not sent:
             logger.error("Confirmation email failed: order=%s to=%s", order.order_number, customer_email)
