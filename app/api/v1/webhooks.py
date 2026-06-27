@@ -170,10 +170,25 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
         .first()
     )
 
-    # Reduce stock
+    # Reduce stock — prefer variant stock (new orders); fall back to product.stock (legacy orders)
+    from app.models.product import ProductVariant
     for item in order_with_items.items:
-        if item.product_id:
-            product = db.query(Product).filter(Product.id == item.product_id).first()
+        if item.product_variant_id:
+            variant = (
+                db.query(ProductVariant)
+                .filter(ProductVariant.id == item.product_variant_id)
+                .with_for_update()
+                .first()
+            )
+            if variant:
+                variant.stock = max(0, variant.stock - item.quantity)
+        elif item.product_id:
+            product = (
+                db.query(Product)
+                .filter(Product.id == item.product_id)
+                .with_for_update()
+                .first()
+            )
             if product:
                 product.stock = max(0, product.stock - item.quantity)
 

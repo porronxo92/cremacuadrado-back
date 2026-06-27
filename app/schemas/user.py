@@ -29,6 +29,20 @@ class RefreshToken(BaseModel):
 
 
 # =============================================================================
+# Shared helpers
+# =============================================================================
+
+def _validate_password_strength(v: str) -> str:
+    if len(v) < 8:
+        raise ValueError('La contraseña debe tener al menos 8 caracteres')
+    if not re.search(r'[A-Za-z]', v):
+        raise ValueError('La contraseña debe contener al menos una letra')
+    if not re.search(r'\d', v):
+        raise ValueError('La contraseña debe contener al menos un número')
+    return v
+
+
+# =============================================================================
 # User schemas
 # =============================================================================
 
@@ -43,18 +57,11 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     """User registration schema."""
     password: str = Field(..., min_length=8, max_length=100)
-    
+
     @field_validator('password')
     @classmethod
     def validate_password(cls, v: str) -> str:
-        """Validate password strength."""
-        if len(v) < 8:
-            raise ValueError('La contraseña debe tener al menos 8 caracteres')
-        if not re.search(r'[A-Za-z]', v):
-            raise ValueError('La contraseña debe contener al menos una letra')
-        if not re.search(r'\d', v):
-            raise ValueError('La contraseña debe contener al menos un número')
-        return v
+        return _validate_password_strength(v)
 
 
 class UserLogin(BaseModel):
@@ -95,13 +102,11 @@ class PasswordChange(BaseModel):
     """Password change schema."""
     current_password: str
     new_password: str = Field(..., min_length=8, max_length=100)
-    
+
     @field_validator('new_password')
     @classmethod
     def validate_password(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError('La contraseña debe tener al menos 8 caracteres')
-        return v
+        return _validate_password_strength(v)
 
 
 class ForgotPassword(BaseModel):
@@ -113,6 +118,11 @@ class ResetPassword(BaseModel):
     """Reset password schema."""
     token: str
     new_password: str = Field(..., min_length=8, max_length=100)
+
+    @field_validator('new_password')
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        return _validate_password_strength(v)
 
 
 class GoogleAuthRequest(BaseModel):

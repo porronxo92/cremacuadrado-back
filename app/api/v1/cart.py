@@ -38,14 +38,39 @@ def set_cart_cookie(response: Response, session_id: str) -> None:
 def get_or_create_cart(db: Session, user: Optional[User] = None, session_id: Optional[str] = None) -> Cart:
     cart = None
     if user:
-        cart = db.query(Cart).filter(Cart.user_id == user.id).first()
-        if not cart and session_id:
-            session_cart = db.query(Cart).filter(Cart.session_id == session_id).first()
-            if session_cart:
-                session_cart.user_id = user.id
-                session_cart.session_id = None
-                db.commit()
-                cart = session_cart
+        user_cart = db.query(Cart).filter(Cart.user_id == user.id).first()
+        session_cart = (
+            db.query(Cart).filter(Cart.session_id == session_id).first()
+            if session_id else None
+        )
+
+        if user_cart and session_cart:
+            # Merge session items into the user cart (don't silently discard)
+            session_items = db.query(CartItem).filter(CartItem.cart_id == session_cart.id).all()
+            for s_item in session_items:
+                existing = db.query(CartItem).filter(
+                    CartItem.cart_id == user_cart.id,
+                    CartItem.product_variant_id == s_item.product_variant_id,
+                ).first()
+                if existing:
+                    variant = db.query(ProductVariant).filter(
+                        ProductVariant.id == s_item.product_variant_id
+                    ).first()
+                    max_qty = variant.stock if variant else existing.quantity
+                    existing.quantity = min(existing.quantity + s_item.quantity, max_qty)
+                    db.delete(s_item)
+                else:
+                    s_item.cart_id = user_cart.id
+            db.delete(session_cart)
+            db.commit()
+            cart = user_cart
+        elif session_cart and not user_cart:
+            session_cart.user_id = user.id
+            session_cart.session_id = None
+            db.commit()
+            cart = session_cart
+        else:
+            cart = user_cart
     elif session_id:
         cart = db.query(Cart).filter(Cart.session_id == session_id).first()
 

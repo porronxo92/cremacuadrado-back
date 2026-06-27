@@ -11,7 +11,7 @@ from app.api.deps import DbSession, CurrentUser
 from app.limiter import limiter
 
 logger = logging.getLogger("cremacuadrado.auth")
-from app.models.user import User, PasswordResetToken
+from app.models.user import User, PasswordResetToken, EmailVerificationToken
 from app.schemas.user import (
     UserCreate, UserLogin, UserResponse, Token,
     ForgotPassword, ResetPassword, RefreshToken, GoogleAuthRequest
@@ -24,6 +24,9 @@ from app.utils.security import (
 )
 from app.services.email import EmailService
 from app.config import settings
+
+_MAX_LOGIN_ATTEMPTS = 5
+_LOCKOUT_MINUTES = 15
 
 router = APIRouter()
 
@@ -53,8 +56,18 @@ async def register(request: Request, user_data: UserCreate, db: DbSession):
     db.commit()
     db.refresh(user)
 
+    # Create email verification token
+    ev_token = EmailVerificationToken(
+        user_id=user.id,
+        token=generate_reset_token(),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+    )
+    db.add(ev_token)
+    db.commit()
+
     logger.info("New user registered: email=%s", user.email)
     EmailService.send_welcome_email(user.email, user.first_name)
+    EmailService.send_email_verification(user.email, user.first_name, ev_token.token)
 
     return user
 
@@ -65,7 +78,7 @@ async def login(request: Request, credentials: UserLogin, db: DbSession):
     """Login with email and password."""
     user = db.query(User).filter(User.email == credentials.email.lower()).first()
 
-    if not user or not user.password_hash or not verify_password(credentials.password, user.password_hash):
+    if not user or not user.password_hash:
         logger.warning("Login failed — bad credentials: email=%s", credentials.email.lower())
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -78,6 +91,36 @@ async def login(request: Request, credentials: UserLogin, db: DbSession):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cuenta desactivada"
         )
+
+    # Check account lockout
+    locked_until = getattr(user, "locked_until", None)
+    if locked_until and datetime.now(timezone.utc) < locked_until.replace(tzinfo=timezone.utc):
+        remaining = int((locked_until.replace(tzinfo=timezone.utc) - datetime.now(timezone.utc)).total_seconds() / 60) + 1
+        logger.warning("Login rejected — account locked: email=%s", user.email)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Cuenta bloqueada temporalmente. Inténtalo de nuevo en {remaining} minutos."
+        )
+
+    if not verify_password(credentials.password, user.password_hash):
+        # Increment failed attempts and possibly lock the account
+        attempts = getattr(user, "failed_login_attempts", 0) + 1
+        user.failed_login_attempts = attempts
+        if attempts >= _MAX_LOGIN_ATTEMPTS:
+            user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=_LOCKOUT_MINUTES)
+            user.failed_login_attempts = 0
+            logger.warning("Account locked after %d attempts: email=%s", _MAX_LOGIN_ATTEMPTS, user.email)
+        db.commit()
+        logger.warning("Login failed — bad password: email=%s attempts=%d", user.email, attempts)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Email o contraseña incorrectos"
+        )
+
+    # Successful login — reset lockout counters
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    db.commit()
 
     logger.info("Login success: email=%s role=%s", user.email, user.role)
     token_version = getattr(user, "token_version", 0)
@@ -229,7 +272,8 @@ async def get_current_user_profile(current_user: CurrentUser):
 
 
 @router.post("/forgot-password", response_model=Message)
-async def forgot_password(data: ForgotPassword, db: DbSession):
+@limiter.limit("5/minute")
+async def forgot_password(request: Request, data: ForgotPassword, db: DbSession):
     """Request password reset email."""
     user = db.query(User).filter(User.email == data.email.lower()).first()
 
@@ -252,7 +296,8 @@ async def forgot_password(data: ForgotPassword, db: DbSession):
 
 
 @router.post("/reset-password", response_model=Message)
-async def reset_password(data: ResetPassword, db: DbSession):
+@limiter.limit("5/minute")
+async def reset_password(request: Request, data: ResetPassword, db: DbSession):
     """Reset password using token from email."""
     reset_token = db.query(PasswordResetToken).filter(
         PasswordResetToken.token == data.token
@@ -268,8 +313,31 @@ async def reset_password(data: ResetPassword, db: DbSession):
     user.password_hash = get_password_hash(data.new_password)
     # Invalidate all existing sessions after password reset
     user.token_version = getattr(user, "token_version", 0) + 1
+    user.failed_login_attempts = 0
+    user.locked_until = None
 
     reset_token.used = True
     db.commit()
 
+    EmailService.send_security_notification(user.email, user.first_name, "restablecimiento de contraseña")
     return Message(message="Contraseña actualizada correctamente")
+
+
+@router.post("/verify-email", response_model=Message)
+async def verify_email(token: str, db: DbSession):
+    """Verify email address using token from email."""
+    ev_token = db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.token == token
+    ).first()
+
+    if not ev_token or not ev_token.is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Enlace de verificación inválido o expirado"
+        )
+
+    ev_token.user.email_verified = True
+    ev_token.used = True
+    db.commit()
+
+    return Message(message="Email verificado correctamente")

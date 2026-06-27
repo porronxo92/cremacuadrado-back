@@ -407,3 +407,34 @@ class EmailService:
           {tracking_block}
         """
         return _send(to_email, f"Tu pedido {order_number} ha sido enviado · CremaCuadrado", _wrap_layout(inner))
+
+    @classmethod
+    def send_security_notification(cls, to_email: str, first_name: str, event: str) -> bool:
+        """Notify the user of a sensitive account change (password change, reset, etc.)."""
+        inner = f"""
+          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Aviso de seguridad</h2>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+            Hola <strong>{first_name}</strong>, te informamos de que se ha realizado un <strong>{event}</strong> en tu cuenta CremaCuadrado.
+          </p>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+            Si no has realizado este cambio, ponte en contacto con nosotros de inmediato en
+            <a href="mailto:info@cremacuadrado.com" style="color:#7B1716;">info@cremacuadrado.com</a>.
+          </p>
+        """
+        return _send(to_email, f"Aviso de seguridad: {event} · CremaCuadrado", _wrap_layout(inner))
+
+    @classmethod
+    def send_email_verification(cls, to_email: str, first_name: str, token: str) -> bool:
+        """Send email address verification link."""
+        verify_url = f"{settings.SITE_URL}/auth/verify-email?token={token}"
+        inner = f"""
+          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Verifica tu email</h2>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+            Hola <strong>{first_name}</strong>, haz clic en el botón para verificar tu dirección de email. El enlace caduca en 24 horas.
+          </p>
+          {_btn(verify_url, "Verificar email")}
+          <p style="margin-top:24px;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
+            Si no te has registrado en CremaCuadrado, ignora este email.
+          </p>
+        """
+        return _send(to_email, "Verifica tu email · CremaCuadrado", _wrap_layout(inner))

@@ -98,7 +98,17 @@ def reorder(order_number: str, db: DbSession, current_user: CurrentUser):
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
 
-    # Batch-load all products and existing cart items in 2 queries instead of N
+    from app.models.product import ProductVariant
+
+    # Batch-load variants and products for all order items
+    variant_ids = [item.product_variant_id for item in order.items if item.product_variant_id]
+    variants_by_id = {
+        v.id: v for v in db.query(ProductVariant).filter(
+            ProductVariant.id.in_(variant_ids),
+            ProductVariant.is_active == True,
+        ).all()
+    } if variant_ids else {}
+
     product_ids = [item.product_id for item in order.items if item.product_id]
     products_by_id = {
         p.id: p for p in db.query(Product).filter(
@@ -113,18 +123,18 @@ def reorder(order_number: str, db: DbSession, current_user: CurrentUser):
         db.add(cart)
         db.flush()
 
-    cart_items_by_product = {
-        ci.product_id: ci for ci in db.query(CartItem).filter(
+    cart_items_by_variant = {
+        ci.product_variant_id: ci for ci in db.query(CartItem).filter(
             CartItem.cart_id == cart.id,
-            CartItem.product_id.in_(product_ids),
+            CartItem.product_variant_id.in_(variant_ids),
         ).all()
-    }
+    } if variant_ids else {}
 
     added_count = 0
     unavailable = []
 
     for order_item in order.items:
-        if not order_item.product_id:
+        if not order_item.product_id or not order_item.product_variant_id:
             unavailable.append(order_item.product_name)
             continue
 
@@ -133,21 +143,23 @@ def reorder(order_number: str, db: DbSession, current_user: CurrentUser):
             unavailable.append(order_item.product_name)
             continue
 
-        if not product.is_in_stock:
-            unavailable.append(product.name)
+        variant = variants_by_id.get(order_item.product_variant_id)
+        if not variant or not variant.is_in_stock:
+            unavailable.append(order_item.product_name)
             continue
 
-        quantity_to_add = min(order_item.quantity, product.stock)
-        existing_item = cart_items_by_product.get(product.id)
+        quantity_to_add = min(order_item.quantity, variant.stock)
+        existing_item = cart_items_by_variant.get(variant.id)
 
         if existing_item:
-            existing_item.quantity = min(existing_item.quantity + quantity_to_add, product.stock)
+            existing_item.quantity = min(existing_item.quantity + quantity_to_add, variant.stock)
         else:
             db.add(CartItem(
                 cart_id=cart.id,
                 product_id=product.id,
+                product_variant_id=variant.id,
                 quantity=quantity_to_add,
-                price_at_add=product.price,
+                price_at_add=variant.price,
             ))
 
         added_count += 1

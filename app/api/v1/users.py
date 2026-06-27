@@ -1,6 +1,7 @@
 """
 Users API endpoints - Profile, Addresses.
 """
+import re
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -14,6 +15,7 @@ from app.schemas.user import (
 )
 from app.schemas.common import Message
 from app.utils.security import get_password_hash, verify_password
+from app.services.email import EmailService
 
 router = APIRouter()
 
@@ -58,19 +60,46 @@ async def change_password(
     current_user: CurrentUser
 ):
     """Change current user's password."""
-    # Verify current password
+    # OAuth-only accounts have no password hash — cannot use this endpoint
+    if not current_user.password_hash:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tu cuenta usa Google para autenticarse. No puedes cambiar la contraseña aquí."
+        )
+
     if not verify_password(password_data.current_password, current_user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Contraseña actual incorrecta"
         )
-    
+
     # Update password and invalidate all existing sessions
     current_user.password_hash = get_password_hash(password_data.new_password)
     current_user.token_version = getattr(current_user, "token_version", 0) + 1
     db.commit()
 
+    EmailService.send_security_notification(current_user.email, current_user.first_name, "cambio de contraseña")
     return Message(message="Contraseña actualizada correctamente")
+
+
+@router.delete("/me", response_model=Message)
+async def delete_account(db: DbSession, current_user: CurrentUser):
+    """
+    Anonymise and deactivate the current user's account (RGPD right to erasure).
+    Orders are preserved for legal/fiscal records but PII is stripped.
+    """
+    import uuid
+    anon_suffix = uuid.uuid4().hex[:8]
+    current_user.email = f"deleted_{anon_suffix}@cremacuadrado.invalid"
+    current_user.first_name = "Usuario"
+    current_user.last_name = "Eliminado"
+    current_user.phone = None
+    current_user.google_id = None
+    current_user.password_hash = None
+    current_user.is_active = False
+    current_user.token_version = getattr(current_user, "token_version", 0) + 1
+    db.commit()
+    return Message(message="Cuenta eliminada correctamente")
 
 
 @router.put("/preferences", response_model=Message)

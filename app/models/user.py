@@ -1,5 +1,5 @@
 """
-User models - Users, Addresses, Password Reset Tokens.
+User models - Users, Addresses, Password Reset Tokens, Email Verification Tokens.
 """
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
@@ -26,15 +26,19 @@ class User(Base):
     token_version = Column(Integer, default=0, nullable=False)
     # Google OAuth sub (unique per Google account)
     google_id = Column(String(255), nullable=True, unique=True)
+    # Login-attempt locking (brute-force protection)
+    failed_login_attempts = Column(Integer, default=0, nullable=False)
+    locked_until = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-    
+
     # Relationships
     addresses = relationship("Address", back_populates="user", cascade="all, delete-orphan")
     orders = relationship("Order", back_populates="user")
     reviews = relationship("Review", back_populates="user")
     cart = relationship("Cart", back_populates="user", uselist=False)
     password_reset_tokens = relationship("PasswordResetToken", back_populates="user", cascade="all, delete-orphan")
+    email_verification_tokens = relationship("EmailVerificationToken", back_populates="user", cascade="all, delete-orphan")
     
     @property
     def full_name(self) -> str:
@@ -108,6 +112,32 @@ class PasswordResetToken(Base):
     def is_valid(self) -> bool:
         """Check if token is valid (not used and not expired)."""
         return not self.used and not self.is_expired
-    
+
     def __repr__(self):
         return f"<PasswordResetToken for User {self.user_id}>"
+
+
+class EmailVerificationToken(Base):
+    """Email verification token model."""
+    __tablename__ = "email_verification_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token = Column(String(255), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    user = relationship("User", back_populates="email_verification_tokens")
+
+    @property
+    def is_expired(self) -> bool:
+        return datetime.utcnow() > self.expires_at
+
+    @property
+    def is_valid(self) -> bool:
+        return not self.used and not self.is_expired
+
+    def __repr__(self):
+        return f"<EmailVerificationToken for User {self.user_id}>"

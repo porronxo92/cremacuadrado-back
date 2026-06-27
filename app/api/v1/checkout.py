@@ -114,21 +114,25 @@ async def validate_checkout(
     
     # Load cart items
     cart = db.query(Cart).options(
-        joinedload(Cart.items).joinedload(CartItem.product)
+        joinedload(Cart.items).joinedload(CartItem.product),
+        joinedload(Cart.items).joinedload(CartItem.variant),
     ).filter(Cart.id == cart.id).first()
-    
+
     if not cart.items:
         errors.append("El carrito está vacío")
-    
-    # Validate stock
+
+    # Validate stock against variant (not legacy product.stock)
     for item in cart.items:
         product = item.product
+        variant = item.variant
         if not product.is_active:
             errors.append(f"El producto '{product.name}' ya no está disponible")
-        elif not product.is_in_stock:
-            errors.append(f"El producto '{product.name}' está agotado")
-        elif item.quantity > product.stock:
-            errors.append(f"Solo hay {product.stock} unidades de '{product.name}'")
+        elif not variant or not variant.is_active:
+            errors.append(f"El formato seleccionado de '{product.name}' ya no está disponible")
+        elif not variant.is_in_stock:
+            errors.append(f"El formato {variant.format} de '{product.name}' está agotado")
+        elif item.quantity > variant.stock:
+            errors.append(f"Solo hay {variant.stock} unidades del formato {variant.format} de '{product.name}'")
     
     # Validate guest email
     if not current_user and not checkout_data.guest_email:
@@ -205,7 +209,8 @@ async def create_payment_intent(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Carrito no encontrado")
 
     cart = db.query(Cart).options(
-        joinedload(Cart.items).joinedload(CartItem.product).joinedload(Product.images)
+        joinedload(Cart.items).joinedload(CartItem.product).joinedload(Product.images),
+        joinedload(Cart.items).joinedload(CartItem.variant),
     ).filter(Cart.id == cart.id).first()
 
     # Create Order (status='pending_payment' — stock NOT reduced yet)
@@ -233,11 +238,13 @@ async def create_payment_intent(
     # Snapshot order items (stock not yet reduced)
     for cart_item in cart.items:
         product = cart_item.product
+        variant = cart_item.variant
         order_item = OrderItem(
             order_id=order.id,
             product_id=product.id,
+            product_variant_id=cart_item.product_variant_id,
             product_name=product.name,
-            product_sku=product.sku,
+            product_sku=(variant.sku if variant and variant.sku else product.sku),
             product_image_url=normalize_image_url(product.primary_image),
             quantity=cart_item.quantity,
             unit_price=cart_item.price_at_add,

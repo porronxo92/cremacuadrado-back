@@ -22,7 +22,7 @@ def get_current_user_optional(
     """Get current user if authenticated, None otherwise."""
     if not credentials:
         return None
-    
+
     try:
         payload = jwt.decode(
             credentials.credentials,
@@ -30,15 +30,20 @@ def get_current_user_optional(
             algorithms=[settings.ALGORITHM]
         )
         user_id: str = payload.get("sub")
+        token_ver: int = payload.get("ver", 0)
         if user_id is None:
             return None
     except JWTError:
         return None
-    
+
     user = db.query(User).filter(User.id == int(user_id)).first()
     if user is None or not user.is_active:
         return None
-    
+
+    # Reject tokens issued before the last logout/password-change
+    if getattr(user, "token_version", 0) != token_ver:
+        return None
+
     return user
 
 
