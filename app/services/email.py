@@ -6,6 +6,7 @@ import logging
 import smtplib
 from datetime import datetime
 from decimal import Decimal
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional
@@ -45,6 +46,52 @@ def _send(to_email: str, subject: str, html: str, text: str = "") -> bool:
         return True
     except Exception:
         logger.error("Email failed to=%s subject=%r", to_email, subject, exc_info=True)
+        return False
+
+
+def _send_with_attachment(
+    to_email: str,
+    subject: str,
+    html: str,
+    attachment_bytes: bytes,
+    attachment_filename: str,
+    text: str = "",
+) -> bool:
+    sender = f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM}>"
+
+    if not settings.EMAIL_ENABLED:
+        logger.info(
+            "Email suppressed (EMAIL_ENABLED=False) to=%s subject=%r attachment=%s",
+            to_email, subject, attachment_filename,
+        )
+        return True
+
+    try:
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = subject
+        msg["From"] = sender
+        msg["To"] = to_email
+
+        body = MIMEMultipart("alternative")
+        if text:
+            body.attach(MIMEText(text, "plain", "utf-8"))
+        body.attach(MIMEText(html, "html", "utf-8"))
+        msg.attach(body)
+
+        pdf_part = MIMEApplication(attachment_bytes, _subtype="pdf")
+        pdf_part.add_header("Content-Disposition", "attachment", filename=attachment_filename)
+        msg.attach(pdf_part)
+
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            server.sendmail(settings.EMAIL_FROM, [to_email], msg.as_string())
+
+        logger.info("Email with attachment sent to=%s subject=%r", to_email, subject)
+        return True
+    except Exception:
+        logger.error("Email with attachment failed to=%s subject=%r", to_email, subject, exc_info=True)
         return False
 
 
@@ -409,6 +456,100 @@ class EmailService:
         return _send(to_email, f"Tu pedido {order_number} ha sido enviado · CremaCuadrado", _wrap_layout(inner))
 
     @classmethod
+    def send_order_status_update_email(
+        cls, to_email: str, order_number: str, customer_name: str, new_status: str
+    ) -> bool:
+        status_labels = {
+            "processing": "En preparación",
+            "shipped": "Enviado",
+            "delivered": "Entregado",
+            "cancelled": "Cancelado",
+            "refunded": "Reembolsado",
+        }
+        label = status_labels.get(new_status, new_status)
+        inner = f"""
+          <h2 style="margin:0 0 12px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Actualización de tu pedido</h2>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#6B6456;">Hola <strong>{customer_name}</strong>, tu pedido <strong>{order_number}</strong> ha cambiado de estado.</p>
+          <div style="margin:24px 0;padding:16px;background:#F4F1E9;border-radius:6px;text-align:center;">
+            <p style="margin:0;font-family:Arial,sans-serif;font-size:18px;font-weight:700;color:#7B1716;">{label}</p>
+          </div>
+          {_btn(settings.SITE_URL + "/account/orders", "Ver mis pedidos")}
+        """
+        return _send(to_email, f"Pedido {order_number} — {label} · CremaCuadrado", _wrap_layout(inner))
+
+    @classmethod
+    def send_admin_new_order(
+        cls,
+        order_number: str,
+        customer_name: str,
+        customer_email: str,
+        total: float,
+        items_summary: str,
+        shipping_address: dict,
+        tracking_number: str | None = None,
+    ) -> bool:
+        """Notify admin@cremacuadrado.com of a new paid order."""
+        addr = shipping_address
+        address_html = (
+            f"{addr.get('street', '')} {addr.get('street_2', '') or ''}<br>"
+            f"{addr.get('postal_code', '')} {addr.get('city', '')}<br>"
+            f"{addr.get('province', '')}, {addr.get('country', 'España')}<br>"
+            f"Tel: {addr.get('phone', '')}"
+        )
+        tracking_html = (
+            f"<p style='font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;'>"
+            f"<strong>Localizador Correos:</strong> {tracking_number}</p>"
+        ) if tracking_number else "<p style='font-family:Arial,sans-serif;font-size:13px;color:#6B6456;'>Envío Correos pendiente de generarse.</p>"
+
+        inner = f"""
+          <h2 style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">🛒 Nuevo pedido: {order_number}</h2>
+          <p style="margin:0 0 24px;font-family:Arial,sans-serif;font-size:15px;color:#6B6456;">
+            <strong>{customer_name}</strong> — {customer_email}
+          </p>
+          <table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
+            <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#6B6456;width:140px;">Productos</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;color:#1C1A14;">{items_summary}</td></tr>
+            <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#6B6456;">Total</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;font-weight:700;color:#7B1716;">{total:.2f} €</td></tr>
+            <tr><td style="padding:8px;color:#6B6456;vertical-align:top;">Dirección envío</td>
+                <td style="padding:8px;color:#1C1A14;line-height:1.6;">{address_html}</td></tr>
+          </table>
+          <div style="margin:24px 0 0;">
+            {tracking_html}
+          </div>
+          {_btn(settings.SITE_URL + "/admin/orders", "Ver en el panel admin")}
+        """
+        return _send(
+            settings.ADMIN_EMAIL,
+            f"[CremaCuadrado] Nuevo pedido {order_number} — {total:.2f} €",
+            _wrap_layout(inner),
+        )
+
+    @classmethod
+    def send_admin_status_change(
+        cls, order_number: str, new_status: str, tracking_number: str | None = None
+    ) -> bool:
+        """Notify admin of an automated status change (e.g. Correos update)."""
+        status_labels = {
+            "processing": "En preparación", "shipped": "Enviado",
+            "delivered": "Entregado", "cancelled": "Cancelado",
+        }
+        label = status_labels.get(new_status, new_status)
+        tracking_line = f"<p style='font-family:Arial,sans-serif;font-size:14px;'>Localizador: <strong>{tracking_number}</strong></p>" if tracking_number else ""
+        inner = f"""
+          <h2 style="margin:0 0 12px;font-family:Arial,sans-serif;font-size:20px;color:#7B1716;">
+            Pedido {order_number} → {label}
+          </h2>
+          {tracking_line}
+          {_btn(settings.SITE_URL + "/admin/orders", "Ver en el panel admin")}
+        """
+        return _send(
+            settings.ADMIN_EMAIL,
+            f"[CremaCuadrado] Pedido {order_number} — {label}",
+            _wrap_layout(inner),
+        )
+
+    @classmethod
     def send_security_notification(cls, to_email: str, first_name: str, event: str) -> bool:
         """Notify the user of a sensitive account change (password change, reset, etc.)."""
         inner = f"""
@@ -438,3 +579,47 @@ class EmailService:
           </p>
         """
         return _send(to_email, "Verifica tu email · CremaCuadrado", _wrap_layout(inner))
+
+
+def send_invoice_email(
+    to_email: str,
+    first_name: str,
+    order_number: str,
+    pdf_bytes: bytes,
+) -> bool:
+    """Send invoice PDF as email attachment to the customer."""
+    from app.services.invoice import _invoice_number
+    invoice_number = _invoice_number(order_number)
+    pdf_filename = f"Factura_{invoice_number}.pdf"
+
+    inner = f"""
+      <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">
+        Tu factura está lista
+      </h2>
+      <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+        Hola <strong>{first_name}</strong>, adjuntamos la factura correspondiente al pedido
+        <strong>{order_number}</strong>.
+      </p>
+      <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+        El número de factura es <strong>{invoice_number}</strong>.
+        Puedes guardar el PDF adjunto para tus registros contables.
+      </p>
+      <div style="background:#EDE9DF;border-radius:8px;padding:16px 20px;margin:20px 0;">
+        <p style="margin:0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
+          <strong>Cremacuadrado SL</strong> · CIF B56673700<br>
+          Camino del arca 18 · 13005 Ciudad Real<br>
+          Admin@cremacuadrado.com · 623 286 353
+        </p>
+      </div>
+      <p style="font-family:Arial,sans-serif;font-size:13px;color:#6B6456;margin-top:16px;">
+        Si tienes alguna duda sobre la factura, escríbenos a
+        <a href="mailto:Admin@cremacuadrado.com" style="color:#7B1716;">Admin@cremacuadrado.com</a>.
+      </p>
+    """
+    return _send_with_attachment(
+        to_email=to_email,
+        subject=f"Factura {invoice_number} · CremaCuadrado",
+        html=_wrap_layout(inner),
+        attachment_bytes=pdf_bytes,
+        attachment_filename=pdf_filename,
+    )

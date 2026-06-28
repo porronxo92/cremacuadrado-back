@@ -19,6 +19,7 @@ from app.models.cart import Cart, CartItem
 from app.models.payment import PaymentIntent as PaymentIntentModel, StripeWebhookEvent
 from app.services import stripe_service
 from app.services.email import EmailService, send_order_confirmation, OrderEmailData
+from app.config import settings
 
 router = APIRouter()
 
@@ -255,6 +256,24 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
             logger.error("Confirmation email failed: order=%s to=%s", order.order_number, customer_email)
     else:
         logger.warning("No customer_email for order=%s (guest_email missing?)", order.order_number)
+
+    # Notify admin of new paid order
+    try:
+        items_summary = ", ".join(
+            f"{i.product_name} ×{i.quantity}" for i in order_with_items.items
+        )
+        EmailService.send_admin_new_order(
+            order_number=order.order_number,
+            customer_name=order.shipping_address.get("first_name", "Cliente")
+                + " " + order.shipping_address.get("last_name", ""),
+            customer_email=order.customer_email or "",
+            total=float(order.total),
+            items_summary=items_summary,
+            shipping_address=order.shipping_address,
+            tracking_number=tracking_number,
+        )
+    except Exception as exc:
+        logger.error("Admin new-order email failed: order=%s error=%s", order.order_number, exc)
 
 
 def _handle_payment_failed(db: Session, data: dict) -> None:

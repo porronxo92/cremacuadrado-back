@@ -141,7 +141,8 @@ class OrderListResponse(BaseModel):
     total: Decimal
     item_count: int
     created_at: datetime
-    
+    primary_image_url: Optional[str] = None
+
     model_config = {"from_attributes": True}
 
 

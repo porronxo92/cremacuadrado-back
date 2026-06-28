@@ -23,6 +23,7 @@ from app.api.deps import DbSession, AdminUser
 from app.models.user import User
 from app.models.product import Product, Category, Review, ProductVariant, ProductImage
 from app.models.order import Order, OrderItem
+from app.models.shipment import Shipment
 from app.schemas.order import OrderResponse, OrderStatusUpdate
 from app.schemas.product import ProductResponse, ProductVariantResponse
 from app.schemas.admin import DashboardStats
@@ -298,14 +299,8 @@ def get_order_admin(order_id: int, db: DbSession, admin_user: AdminUser):
     )
 
 
-@router.put("/orders/{order_id}/status", response_model=OrderResponse)
-def update_order_status(
-    order_id: int,
-    status_data: OrderStatusUpdate,
-    db: DbSession,
-    admin_user: AdminUser
-):
-    """Update order status (admin)."""
+def _do_update_order_status(order_id: int, status_data: OrderStatusUpdate, db, admin_user):
+    """Shared logic for PUT and PATCH on order status."""
     order = db.query(Order).options(
         joinedload(Order.items)
     ).filter(Order.id == order_id).first()
@@ -335,29 +330,30 @@ def update_order_status(
     
     if status_data.admin_notes:
         order.admin_notes = status_data.admin_notes
-    
+
     db.commit()
     db.refresh(order)
-    
-    # Send notification email
+
     customer_email = order.customer_email
     customer_name = order.shipping_address.get("first_name", "Cliente")
-    
-    if status_data.status == "shipped" and order.tracking_number:
-        EmailService.send_order_shipped_email(
-            to_email=customer_email,
-            order_number=order.order_number,
-            customer_name=customer_name,
-            tracking_number=order.tracking_number,
-        )
-    elif old_status != status_data.status:
-        EmailService.send_order_status_update_email(
-            to_email=customer_email,
-            order_number=order.order_number,
-            customer_name=customer_name,
-            new_status=status_data.status,
-        )
-    
+
+    if old_status != status_data.status:
+        # Notify customer
+        if status_data.status == "shipped" and order.tracking_number:
+            EmailService.send_order_shipped_email(
+                to_email=customer_email,
+                order_number=order.order_number,
+                customer_name=customer_name,
+                tracking_number=order.tracking_number,
+            )
+        elif customer_email:
+            EmailService.send_order_status_update_email(
+                to_email=customer_email,
+                order_number=order.order_number,
+                customer_name=customer_name,
+                new_status=status_data.status,
+            )
+
     return OrderResponse(
         id=order.id,
         order_number=order.order_number,
@@ -379,6 +375,87 @@ def update_order_status(
         paid_at=order.paid_at,
         shipped_at=order.shipped_at,
         delivered_at=order.delivered_at,
+    )
+
+
+@router.put("/orders/{order_id}/status", response_model=OrderResponse)
+def update_order_status_put(order_id: int, status_data: OrderStatusUpdate, db: DbSession, admin_user: AdminUser):
+    """Update order status (admin) — PUT."""
+    return _do_update_order_status(order_id, status_data, db, admin_user)
+
+
+@router.patch("/orders/{order_id}/status", response_model=OrderResponse)
+def update_order_status_patch(order_id: int, status_data: OrderStatusUpdate, db: DbSession, admin_user: AdminUser):
+    """Update order status (admin) — PATCH alias."""
+    return _do_update_order_status(order_id, status_data, db, admin_user)
+
+
+@router.get("/orders/{order_id}/shipment")
+def get_order_shipment(order_id: int, db: DbSession, admin_user: AdminUser):
+    """Get Correos shipment details for an order."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
+
+    shipment = db.query(Shipment).filter(Shipment.order_id == order_id).first()
+    if not shipment:
+        return {"shipment": None}
+
+    correos_url = None
+    if shipment.localizador:
+        correos_url = (
+            f"https://www.correos.es/es/es/herramientas/localizador/envios/detalle"
+            f"?tracking-number={shipment.localizador}"
+        )
+
+    return {
+        "shipment": {
+            "id": shipment.id,
+            "localizador": shipment.localizador,
+            "status": shipment.status,
+            "service_code": shipment.service_code,
+            "weight_grams": shipment.weight_grams,
+            "label_url": shipment.label_url,
+            "error": shipment.error,
+            "correos_tracking_url": correos_url,
+            "created_at": shipment.created_at,
+            "updated_at": shipment.updated_at,
+        }
+    }
+
+
+@router.patch("/orders/{order_id}/tracking", response_model=OrderResponse)
+def update_tracking_number(
+    order_id: int,
+    db: DbSession,
+    admin_user: AdminUser,
+    tracking_number: str = Query(..., description="Número de seguimiento Correos"),
+):
+    """Manually set or update the tracking number for an order."""
+    order = db.query(Order).options(joinedload(Order.items)).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
+
+    order.tracking_number = tracking_number
+
+    # Also update the associated shipment localizador if one exists
+    shipment = db.query(Shipment).filter(Shipment.order_id == order_id).first()
+    if shipment:
+        shipment.localizador = tracking_number
+
+    db.commit()
+    db.refresh(order)
+
+    return OrderResponse(
+        id=order.id, order_number=order.order_number, status=order.status,
+        subtotal=order.subtotal, shipping_cost=order.shipping_cost,
+        discount=order.discount, coupon_code=order.coupon_code,
+        tax=order.tax, total=order.total,
+        shipping_address=order.shipping_address, billing_address=order.billing_address,
+        payment_method=order.payment_method, tracking_number=order.tracking_number,
+        customer_notes=order.customer_notes, items=order.items,
+        item_count=order.item_count, created_at=order.created_at,
+        paid_at=order.paid_at, shipped_at=order.shipped_at, delivered_at=order.delivered_at,
     )
 
 

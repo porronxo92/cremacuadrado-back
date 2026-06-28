@@ -3,7 +3,7 @@ Orders API endpoints.
 """
 from typing import List
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from sqlalchemy.orm import joinedload
 
 from app.api.deps import DbSession, CurrentUser
@@ -32,6 +32,11 @@ def list_orders(
     total = query.count()
     orders = query.offset((page - 1) * page_size).limit(page_size).all()
 
+    def _primary_image(order: Order) -> str | None:
+        if order.items:
+            return order.items[0].product_image_url
+        return None
+
     return PaginatedResponse.create(
         [
             OrderListResponse(
@@ -41,6 +46,7 @@ def list_orders(
                 total=order.total,
                 item_count=order.item_count,
                 created_at=order.created_at,
+                primary_image_url=_primary_image(order),
             )
             for order in orders
         ],
@@ -172,3 +178,70 @@ def reorder(order_number: str, db: DbSession, current_user: CurrentUser):
         message = f"Se añadieron {added_count} productos al carrito"
 
     return Message(message=message)
+
+
+@router.post("/{order_number}/cancel", response_model=Message)
+def cancel_order(order_number: str, db: DbSession, current_user: CurrentUser):
+    """Cancel a pending order."""
+    order = db.query(Order).filter(
+        Order.order_number == order_number,
+        Order.user_id == current_user.id,
+    ).first()
+
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
+
+    if order.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se pueden cancelar pedidos en estado pendiente",
+        )
+
+    order.status = "cancelled"
+    db.commit()
+    return Message(message="Pedido cancelado correctamente")
+
+
+_INVOICEABLE_STATUSES = {"paid", "processing", "shipped", "delivered"}
+
+
+@router.post("/{order_number}/request-invoice", response_model=Message)
+def request_invoice(
+    order_number: str,
+    db: DbSession,
+    current_user: CurrentUser,
+    background_tasks: BackgroundTasks,
+):
+    """Generate a PDF invoice and send it by email to the authenticated user."""
+    order = db.query(Order).options(
+        joinedload(Order.items)
+    ).filter(
+        Order.order_number == order_number,
+        Order.user_id == current_user.id,
+    ).first()
+
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
+
+    if order.status not in _INVOICEABLE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La factura solo está disponible para pedidos pagados",
+        )
+
+    customer_name = f"{current_user.first_name} {current_user.last_name}".strip()
+    customer_email = current_user.email
+
+    def _send_invoice():
+        from app.services.invoice import generate_invoice_pdf
+        from app.services.email import send_invoice_email
+        pdf_bytes = generate_invoice_pdf(order, customer_name, customer_email)
+        send_invoice_email(
+            to_email=customer_email,
+            first_name=current_user.first_name or customer_name,
+            order_number=order_number,
+            pdf_bytes=pdf_bytes,
+        )
+
+    background_tasks.add_task(_send_invoice)
+    return Message(message=f"Factura enviada a {customer_email}")
