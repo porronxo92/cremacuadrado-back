@@ -10,7 +10,7 @@ from app.api.deps import DbSession, CurrentUser
 from app.models.order import Order, OrderItem
 from app.models.cart import Cart, CartItem
 from app.models.product import Product
-from app.schemas.order import OrderResponse, OrderListResponse
+from app.schemas.order import OrderResponse, OrderListResponse, OrderItemResponse
 from app.schemas.common import Message, PaginatedResponse
 from app.utils.url import normalize_image_url
 from app.config import settings
@@ -62,7 +62,7 @@ def list_orders(
 def get_order(order_number: str, db: DbSession, current_user: CurrentUser):
     """Get order details by order number."""
     order = db.query(Order).options(
-        joinedload(Order.items)
+        joinedload(Order.items).joinedload(OrderItem.product).joinedload(Product.images)
     ).filter(
         Order.order_number == order_number,
         Order.user_id == current_user.id
@@ -70,6 +70,24 @@ def get_order(order_number: str, db: DbSession, current_user: CurrentUser):
 
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
+
+    items = [
+        OrderItemResponse(
+            id=item.id,
+            product_id=item.product_id,
+            product_name=item.product_name,
+            product_sku=item.product_sku,
+            product_image_url=(
+                normalize_image_url(item.product.primary_image)
+                if item.product
+                else normalize_image_url(item.product_image_url)
+            ),
+            quantity=item.quantity,
+            unit_price=item.unit_price,
+            total=item.total,
+        )
+        for item in order.items
+    ]
 
     return OrderResponse(
         id=order.id,
@@ -86,7 +104,7 @@ def get_order(order_number: str, db: DbSession, current_user: CurrentUser):
         payment_method=order.payment_method,
         tracking_number=order.tracking_number,
         customer_notes=order.customer_notes,
-        items=order.items,
+        items=items,
         item_count=order.item_count,
         created_at=order.created_at,
         paid_at=order.paid_at,
