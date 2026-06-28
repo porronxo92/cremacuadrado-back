@@ -12,6 +12,7 @@ from app.models.cart import Cart, CartItem
 from app.models.product import Product
 from app.schemas.order import OrderResponse, OrderListResponse
 from app.schemas.common import Message, PaginatedResponse
+from app.utils.url import normalize_image_url
 from app.config import settings
 
 router = APIRouter()
@@ -26,16 +27,19 @@ def list_orders(
 ):
     """Get current user's orders."""
     query = db.query(Order).options(
-        joinedload(Order.items)
+        joinedload(Order.items).joinedload(OrderItem.product).joinedload(Product.images)
     ).filter(Order.user_id == current_user.id).order_by(Order.created_at.desc())
 
     total = query.count()
     orders = query.offset((page - 1) * page_size).limit(page_size).all()
 
     def _primary_image(order: Order) -> str | None:
-        if order.items:
-            return order.items[0].product_image_url
-        return None
+        if not order.items:
+            return None
+        item = order.items[0]
+        if item.product:
+            return normalize_image_url(item.product.primary_image)
+        return normalize_image_url(item.product_image_url)
 
     return PaginatedResponse.create(
         [
