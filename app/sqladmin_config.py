@@ -89,6 +89,7 @@ from app.models.cart import Cart, CartItem
 from app.models.order import Order, OrderItem, Coupon
 from app.models.payment import PaymentIntent, StripeWebhookEvent, Refund
 from app.models.blog import BlogPost, BlogCategory
+from app.models.point_of_sale import PointOfSale
 
 
 # ─── Usuarios ────────────────────────────────────────────────────────────────
@@ -586,6 +587,27 @@ class BlogPostAdmin(ModelView, model=BlogPost):
     name_plural = "Artículos del Blog"
     icon = "fa-solid fa-newspaper"
     category = "Blog"
+
+
+# ─── Puntos de Venta ──────────────────────────────────────────────────────────
+
+class PointOfSaleAdmin(ModelView, model=PointOfSale):
+    name = "Punto de Venta"
+    name_plural = "Puntos de Venta"
+    icon = "fa-solid fa-store"
+    category = "Puntos de Venta"
+
+    column_list = [
+        PointOfSale.id,
+        PointOfSale.name,
+        PointOfSale.city,
+        PointOfSale.is_active,
+        PointOfSale.sort_order,
+    ]
+    column_searchable_list = [PointOfSale.name, PointOfSale.city]
+    column_sortable_list = [PointOfSale.id, PointOfSale.city, PointOfSale.sort_order]
+
+    form_excluded_columns = ["created_at"]
 
     column_list = [
         BlogPost.id,

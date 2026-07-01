@@ -11,7 +11,7 @@ CremaCuadrado es un ecommerce D2C (Direct-to-Consumer) de crema de pistacho manc
 - **B2B Punto de venta** — tiendas gourmet y delicatessen que revenden el producto
 - **B2B Ingrediente profesional** — restaurantes, pastelerías y cafés de especialidad que usan la crema como ingrediente
 
-El backend gestiona el catálogo de productos, el carrito, el flujo de checkout con Stripe, la autenticación de usuarios, el sistema de suscripción mensual (club mensual −15%), los formularios B2B y la integración con HubSpot CRM.
+El backend gestiona el catálogo de productos, el carrito, el flujo de checkout con Stripe, la autenticación de usuarios, el sistema de suscripción mensual (club mensual −15%) y los formularios B2B (leads guardados en tabla propia + notificación por email a b2b@cremacuadrado.com).
 
 ### Stack tecnológico
 
@@ -26,9 +26,9 @@ El backend gestiona el catálogo de productos, el carrito, el flujo de checkout 
 ### Patrones conocidos
 
 - Separación clara entre lógica B2C y B2B
-- Formularios B2B conectados a HubSpot CRM vía webhook o API
+- Formularios B2B guardan el lead en tabla propia (BBDD) y notifican por email a b2b@cremacuadrado.com (integración con un CRM externo tipo HubSpot queda como posible mejora futura, no implementada)
 - Evento `purchase` dispara secuencias automatizadas en la herramienta de email marketing
-- Variables de entorno para todas las credenciales externas (Stripe, HubSpot, Google OAuth)
+- Variables de entorno para todas las credenciales externas (Stripe, Google OAuth)
 
 ---
 
@@ -85,9 +85,9 @@ BBDD: postgresql://postgres.pochhuolpjgzjjbgrlia:%3F%40%2A85PP5xam%2B%25@aws-0-e
 - `GET /subscriptions/me` — estado de suscripción del usuario
 
 #### Formularios B2B
-- `POST /leads/punto-de-venta` — formulario /para-tiendas → HubSpot etapa "Solicitud punto de venta recibida"
-- `POST /leads/profesional` — formulario /para-restaurantes → HubSpot etapa "Solicitud profesional recibida"
-- `POST /leads/puntos-de-venta-interes` — formulario captación /puntos-de-venta → HubSpot etapa "Interés punto de venta"
+- `POST /leads/punto-de-venta` — formulario /para-tiendas → guarda lead con etapa "Solicitud punto de venta recibida" + email confirmación al solicitante + notificación a b2b@cremacuadrado.com
+- `POST /leads/profesional` — formulario /para-restaurantes → guarda lead con etapa "Solicitud profesional recibida" + email confirmación al solicitante + notificación a b2b@cremacuadrado.com
+- `POST /leads/puntos-de-venta-interes` — formulario captación /puntos-de-venta → guarda lead con etapa "Interés punto de venta"
 
 #### Email marketing
 - `POST /newsletter/subscribe` — captura general (homepage bloque 5) → lista "General"
@@ -209,7 +209,6 @@ B2BLead
   id, type (punto_de_venta | profesional | interes_punto_de_venta)
   name, establishment_name, city, email, phone
   establishment_type (dropdown value)
-  hubspot_contact_id (se rellena tras sync con HubSpot)
   status (new | contacted | sample_sent | closed_won | closed_lost)
   created_at
 ```
@@ -274,15 +273,15 @@ El webhook `POST /webhooks/stripe` al recibir `payment_intent.succeeded` debe:
 - **Webhook endpoint**: `POST /webhooks/stripe` — verificar firma con `STRIPE_WEBHOOK_SECRET`
 - **Variables de entorno**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PUBLISHABLE_KEY`
 
-### HubSpot CRM
+### Leads B2B (tabla propia, sin CRM externo)
 
 - **Propósito**: gestión del pipeline B2B
 - **Etapas configuradas**:
   - "Solicitud punto de venta recibida" — formulario /para-tiendas
   - "Solicitud profesional recibida" — formulario /para-restaurantes
   - "Interés punto de venta" — formulario /puntos-de-venta
-- **Trigger**: al enviar cualquier formulario B2B, crear contacto en HubSpot + notificación interna a Lucas y Stefano
-- **Variables de entorno**: `HUBSPOT_API_KEY`
+- **Trigger**: al enviar cualquier formulario B2B, se guarda el lead en la tabla `B2BLead` + email de confirmación al solicitante + notificación interna a b2b@cremacuadrado.com (Lucas y Stefano)
+- Integración con un CRM externo (ej. HubSpot) queda como posible mejora futura, no implementada por ahora.
 
 ### Google OAuth
 

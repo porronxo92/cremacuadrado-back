@@ -12,6 +12,7 @@ from app.limiter import limiter
 
 logger = logging.getLogger("cremacuadrado.auth")
 from app.models.user import User, PasswordResetToken, EmailVerificationToken
+from app.models.lead import NewsletterLead
 from app.schemas.user import (
     UserCreate, UserLogin, UserResponse, Token,
     ForgotPassword, ResetPassword, RefreshToken, GoogleAuthRequest
@@ -55,6 +56,12 @@ async def register(request: Request, user_data: UserCreate, db: DbSession):
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    # Mark any newsletter lead for this email as converted
+    lead = db.query(NewsletterLead).filter(NewsletterLead.email == user.email).first()
+    if lead and not lead.converted_at:
+        lead.converted_at = datetime.now(timezone.utc)
+        db.commit()
 
     # Create email verification token
     ev_token = EmailVerificationToken(
@@ -185,6 +192,12 @@ async def google_auth(request: Request, data: GoogleAuthRequest, db: DbSession):
         db.add(user)
         db.commit()
         db.refresh(user)
+
+        lead = db.query(NewsletterLead).filter(NewsletterLead.email == user.email).first()
+        if lead and not lead.converted_at:
+            lead.converted_at = datetime.now(timezone.utc)
+            db.commit()
+
         EmailService.send_welcome_email(user.email, user.first_name)
 
     if not user.is_active:

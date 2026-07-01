@@ -40,6 +40,7 @@ from app.sqladmin_config import (
     OrderAdmin, OrderItemAdmin, CouponAdmin,
     PaymentIntentAdmin, StripeWebhookEventAdmin, RefundAdmin,
     BlogCategoryAdmin, BlogPostAdmin,
+    PointOfSaleAdmin,
 )
 
 # 30 days in seconds — images rarely change
@@ -142,6 +143,7 @@ _sqladmin.add_view(StripeWebhookEventAdmin)
 _sqladmin.add_view(RefundAdmin)
 _sqladmin.add_view(BlogCategoryAdmin)
 _sqladmin.add_view(BlogPostAdmin)
+_sqladmin.add_view(PointOfSaleAdmin)
 
 # Trusted Host middleware — prevents Host header injection
 # In production set ALLOWED_HOSTS=["cremacuadrado-back.vercel.app"] in env vars

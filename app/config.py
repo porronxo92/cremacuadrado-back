@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     ADMIN_EMAIL: str = "admin@cremacuadrado.com"
     ADMIN_PASSWORD: str  # Required — set via .env, never hardcode
 
+    # B2B — where /para-tiendas and /para-restaurantes lead notifications land
+    B2B_NOTIFICATION_EMAIL: str = "b2b@cremacuadrado.com"
+
     # Base URL for legacy /static/ image paths (leave empty in production — use BLOB_BASE_URL instead)
     BASE_URL: str = ""
 

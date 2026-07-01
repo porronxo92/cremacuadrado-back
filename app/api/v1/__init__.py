@@ -10,6 +10,9 @@ from app.api.v1.users import router as users_router
 from app.api.v1.blog import router as blog_router
 from app.api.v1.admin import router as admin_router
 from app.api.v1.webhooks import router as webhooks_router
+from app.api.v1.newsletter import router as newsletter_router
+from app.api.v1.leads import router as leads_router
+from app.api.v1.points_of_sale import router as points_of_sale_router
 
 router = APIRouter()
 
@@ -22,3 +25,6 @@ router.include_router(users_router, prefix="/users", tags=["Users"])
 router.include_router(blog_router, prefix="/blog", tags=["Blog"])
 router.include_router(admin_router, prefix="/admin", tags=["Admin"])
 router.include_router(webhooks_router, prefix="/webhooks", tags=["Webhooks"])
+router.include_router(newsletter_router, prefix="/newsletter", tags=["Newsletter"])
+router.include_router(leads_router, prefix="/leads", tags=["Leads B2B"])
+router.include_router(points_of_sale_router, prefix="/points-of-sale", tags=["Points of Sale"])

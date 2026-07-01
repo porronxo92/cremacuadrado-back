@@ -457,6 +457,25 @@ class EmailService:
         return _send(to_email, "¡Bienvenido a CremaCuadrado!", _wrap_layout(inner))
 
     @classmethod
+    def send_newsletter_welcome_email(cls, to_email: str, coupon_code: str) -> bool:
+        """Send the welcome coupon to a lead captured via the homepage popup."""
+        inner = f"""
+          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">¡Bienvenido/a a CremaCuadrado!</h2>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+            Gracias por unirte. Aquí tienes tu código para disfrutar de un <strong>10% de descuento en tu primer pedido</strong>.
+          </p>
+          <div style="margin:24px 0;padding:20px;background-color:#F4F1E9;border-radius:6px;text-align:center;border:1px dashed #7B1716;">
+            <p style="margin:0 0 4px;font-family:Arial,sans-serif;font-size:12px;color:#6B6456;text-transform:uppercase;letter-spacing:1px;">Tu código de descuento</p>
+            <p style="margin:0;font-family:Arial,sans-serif;font-size:24px;font-weight:700;color:#7B1716;letter-spacing:3px;">{coupon_code}</p>
+          </div>
+          {_btn(settings.SITE_URL + "/tienda", "Ir a la tienda")}
+          <p style="margin-top:24px;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
+            Aplícalo en el carrito antes de pagar. Válido para tu primer pedido.
+          </p>
+        """
+        return _send(to_email, "Tu 10% de descuento te espera · CremaCuadrado", _wrap_layout(inner))
+
+    @classmethod
     def send_password_reset_email(cls, to_email: str, reset_token: str) -> bool:
         reset_url = f"{settings.SITE_URL}/auth/reset-password?token={reset_token}"
         inner = f"""
@@ -659,6 +678,58 @@ class EmailService:
           </p>
         """
         return _send(to_email, f"Aviso de seguridad: {event} · CremaCuadrado", _wrap_layout(inner))
+
+    @classmethod
+    def send_pos_lead_confirmation_email(cls, to_email: str, establishment_name: str) -> bool:
+        """Confirm receipt of a /para-tiendas B2B lead to the person who submitted it."""
+        inner = f"""
+          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">¡Gracias por tu interés, {establishment_name}!</h2>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+            Hemos recibido tu solicitud para convertirte en punto de venta CremaCuadrado. Nos pondremos en
+            contacto contigo en un plazo máximo de <strong>48 horas</strong> para contarte las condiciones
+            comerciales y, si te interesa, enviarte una muestra gratuita.
+          </p>
+          {_btn(settings.SITE_URL + "/para-tiendas", "Ver ventajas de ser punto de venta")}
+        """
+        return _send(to_email, "Hemos recibido tu solicitud · CremaCuadrado", _wrap_layout(inner))
+
+    @classmethod
+    def send_admin_new_pos_lead(
+        cls,
+        name: str,
+        establishment_name: str,
+        city: str,
+        establishment_type: str,
+        email: str,
+        phone: str,
+    ) -> bool:
+        """Notify the B2B team of a new /para-tiendas lead."""
+        inner = f"""
+          <h2 style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Nuevo lead: punto de venta</h2>
+          <p style="margin:0 0 24px;font-family:Arial,sans-serif;font-size:15px;color:#6B6456;">
+            Solicitud recibida desde /para-tiendas
+          </p>
+          <table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
+            <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#6B6456;width:160px;">Nombre</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;color:#1C1A14;">{name}</td></tr>
+            <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#6B6456;">Tienda</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;color:#1C1A14;">{establishment_name}</td></tr>
+            <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#6B6456;">Tipo de establecimiento</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;color:#1C1A14;">{establishment_type}</td></tr>
+            <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#6B6456;">Ciudad</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;color:#1C1A14;">{city}</td></tr>
+            <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#6B6456;">Email</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;color:#1C1A14;">{email}</td></tr>
+            <tr><td style="padding:8px;color:#6B6456;">Teléfono</td>
+                <td style="padding:8px;color:#1C1A14;">{phone}</td></tr>
+          </table>
+        """
+        return _send(
+            settings.B2B_NOTIFICATION_EMAIL,
+            f"[CremaCuadrado] Nuevo lead punto de venta — {establishment_name}",
+            _wrap_layout(inner),
+            mailbox="info",
+        )
 
     @classmethod
     def send_email_verification(cls, to_email: str, first_name: str, token: str) -> bool:

@@ -6,6 +6,8 @@ from app.models.cart import Cart, CartItem
 from app.models.order import Order, OrderItem, Coupon
 from app.models.shipment import Shipment, ShipmentEvent
 from app.models.blog import BlogPost, BlogCategory
+from app.models.lead import NewsletterLead
+from app.models.pos_lead import PosLead
 
 __all__ = [
     "Base",
@@ -28,4 +30,6 @@ __all__ = [
     "ShipmentEvent",
     "BlogPost",
     "BlogCategory",
+    "NewsletterLead",
+    "PosLead",
 ]
