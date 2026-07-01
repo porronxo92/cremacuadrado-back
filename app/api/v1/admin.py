@@ -70,6 +70,7 @@ def _product_response(product: Product) -> ProductResponse:
         short_description=product.short_description,
         description=product.description,
         badge_color=product.badge_color,
+        audio_url=product.audio_url,
         is_active=product.is_active,
         is_featured=product.is_featured,
         is_in_stock=product.is_in_stock,
@@ -593,7 +594,7 @@ def list_products_admin(
         return ProductResponse(
             id=p.id, sku=p.sku, slug=p.slug, name=p.name,
             short_description=p.short_description, description=p.description,
-            badge_color=p.badge_color, is_active=p.is_active, is_featured=p.is_featured,
+            badge_color=p.badge_color, audio_url=p.audio_url, is_active=p.is_active, is_featured=p.is_featured,
             is_in_stock=p.is_in_stock, category=p.category, images=product_level_images,
             nutrition=p.nutrition, variants=[_variant_resp(v) for v in p.variants],
             average_rating=avg, review_count=cnt,
@@ -615,7 +616,7 @@ def create_product(
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ya existe un producto con este slug")
 
-    allowed = {"sku", "slug", "name", "short_description", "description", "badge_color",
+    allowed = {"sku", "slug", "name", "short_description", "description", "badge_color", "audio_url",
                "is_active", "is_featured", "category_id", "meta_title", "meta_description"}
     product = Product(**{k: v for k, v in product_data.items() if k in allowed})
     db.add(product)
@@ -647,7 +648,7 @@ def update_product(
         if db.query(Product).filter(Product.slug == product_data["slug"], Product.id != product_id).first():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ya existe un producto con este slug")
 
-    allowed = {"sku", "slug", "name", "short_description", "description", "badge_color",
+    allowed = {"sku", "slug", "name", "short_description", "description", "badge_color", "audio_url",
                "is_active", "is_featured", "category_id", "meta_title", "meta_description"}
     for field, value in product_data.items():
         if field in allowed:
@@ -726,6 +727,46 @@ async def upload_image(
         raise HTTPException(status_code=500, detail=f"Error subiendo imagen: {exc}")
 
     logger.info("Image uploaded: pathname=%s size=%d url=%s", pathname, len(content), public_url)
+    return {"url": public_url, "filename": filename}
+
+
+_ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".mp4", ".m4a", ".wav", ".ogg"}
+
+
+@router.post("/upload-audio")
+async def upload_audio(
+    admin_user: AdminUser,
+    file: UploadFile = File(...),
+    dest_path: str = Form(...),
+):
+    """
+    Upload an audio clip to Vercel Blob under audios/{dest_path}/.
+    Returns the public CDN URL.
+
+    dest_path examples:
+      "products/Crema Pistacho Pura"
+      "products/Crema Pistacho Crunchy"
+    """
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in _ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Formato no permitido. Usa: {', '.join(_ALLOWED_AUDIO_EXTENSIONS)}",
+        )
+
+    clean_path = _safe_dest(dest_path)
+    safe_name = re.sub(r"[^a-zA-Z0-9._\-]", "_", os.path.basename(file.filename or "file"))
+    filename = f"{_uuid.uuid4().hex[:8]}_{safe_name}"
+    pathname = f"audios/{clean_path}/{filename}"
+
+    content = await file.read()
+    try:
+        public_url = await blob_service.upload(content, pathname)
+    except Exception as exc:
+        logger.error("Audio upload failed: pathname=%s error=%s", pathname, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error subiendo audio: {exc}")
+
+    logger.info("Audio uploaded: pathname=%s size=%d url=%s", pathname, len(content), public_url)
     return {"url": public_url, "filename": filename}
 
 

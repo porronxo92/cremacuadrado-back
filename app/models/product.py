@@ -42,6 +42,7 @@ class Product(Base):
     short_description = Column(Text, nullable=True)
     description = Column(Text, nullable=True)
     badge_color = Column(String(20), nullable=True)  # e.g. #F5A542 (Crunchy), #A2BA1C (Pura)
+    audio_url = Column(String(500), nullable=True)  # "Trilogía del sabor" 30s clip, stored in Vercel Blob
     # price/stock/weight live on ProductVariant — kept nullable for legacy compat
     price = Column(Numeric(10, 2), nullable=True)
     compare_price = Column(Numeric(10, 2), nullable=True)

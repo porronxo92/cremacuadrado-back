@@ -128,6 +128,7 @@ class ProductResponse(BaseModel):
     short_description: Optional[str]
     description: Optional[str]
     badge_color: Optional[str]
+    audio_url: Optional[str] = None
     is_active: bool
     is_featured: bool
     is_in_stock: bool

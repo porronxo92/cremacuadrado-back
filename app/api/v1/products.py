@@ -173,6 +173,7 @@ def get_product(slug: str, db: DbSession):
         short_description=product.short_description,
         description=product.description,
         badge_color=product.badge_color,
+        audio_url=product.audio_url,
         is_active=product.is_active,
         is_featured=product.is_featured,
         is_in_stock=product.is_in_stock,
