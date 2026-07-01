@@ -282,6 +282,22 @@ def _handle_payment_failed(db: Session, data: dict) -> None:
     if order and order.status == "pending_payment":
         order.status = "payment_failed"
         logger.warning("Payment failed: order=%s pi=%s", order.order_number, stripe_pi_id)
+
+        customer_email = order.customer_email
+        if customer_email:
+            error_message = (data.get("last_payment_error") or {}).get("message")
+            try:
+                EmailService.send_payment_failed_email(
+                    to_email=customer_email,
+                    order_number=order.order_number,
+                    customer_name=order.shipping_address.get("first_name", "Cliente"),
+                    error_message=error_message,
+                )
+            except Exception as exc:
+                logger.error("Payment-failed email failed: order=%s error=%s", order.order_number, exc, exc_info=True)
+        else:
+            logger.warning("No customer_email for order=%s (payment_failed email skipped)", order.order_number)
+
     _update_pi_status(db, stripe_pi_id, "requires_payment_method")
 
 

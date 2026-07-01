@@ -56,3 +56,4 @@ build/
 # ── Static uploads (images subidas por usuarios) ──────────
 static/images/products/*
 !static/images/products/.gitkeep
+prod.env

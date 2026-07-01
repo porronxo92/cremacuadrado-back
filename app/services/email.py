@@ -1,51 +1,109 @@
 """
 Email service — SMTP with inline-CSS HTML templates.
 Set EMAIL_ENABLED=True in .env and configure SMTP_* variables to send real emails.
+
+Outgoing mail routes through one of two mailboxes (see app/config.py):
+  "pedidos" — Pedidos@cremacuadrado.com: confirmación de pedido, fallo de pago,
+              actualización de envío, factura
+  "info"    — Info@cremacuadrado.com: bienvenida, verificación, seguridad, y
+              cualquier otro email que no sea de pedidos (newsletter, contacto, B2B...)
 """
 import logging
 import smtplib
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Optional
+from typing import Literal, Optional
 
 from app.config import settings
 
 logger = logging.getLogger("cremacuadrado.email")
+
+MailboxKind = Literal["pedidos", "info"]
+
+
+# ---------------------------------------------------------------------------
+# Mailbox routing
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class _Mailbox:
+    host: str
+    port: int
+    user: str
+    password: str
+    from_email: str
+    from_name: str
+
+    @property
+    def sender(self) -> str:
+        return f"{self.from_name} <{self.from_email}>"
+
+
+def _info_mailbox() -> _Mailbox:
+    return _Mailbox(
+        host=settings.SMTP_INFO_HOST,
+        port=settings.SMTP_INFO_PORT,
+        user=settings.SMTP_INFO_USER,
+        password=settings.SMTP_INFO_PASSWORD,
+        from_email=settings.SMTP_INFO_FROM_EMAIL,
+        from_name=settings.SMTP_INFO_FROM_NAME,
+    )
+
+
+def _mailbox(kind: MailboxKind) -> _Mailbox:
+    """Resolve SMTP credentials for the given category.
+
+    Pedidos@ falls back to Info@ if its dedicated credentials haven't been
+    configured yet in .env, so order emails keep working meanwhile.
+    """
+    if kind == "pedidos":
+        if settings.SMTP_PEDIDOS_USER and settings.SMTP_PEDIDOS_PASSWORD:
+            return _Mailbox(
+                host=settings.SMTP_PEDIDOS_HOST,
+                port=settings.SMTP_PEDIDOS_PORT,
+                user=settings.SMTP_PEDIDOS_USER,
+                password=settings.SMTP_PEDIDOS_PASSWORD,
+                from_email=settings.SMTP_PEDIDOS_FROM_EMAIL,
+                from_name=settings.SMTP_PEDIDOS_FROM_NAME,
+            )
+        logger.warning("SMTP_PEDIDOS_USER/PASSWORD not set, falling back to Info@ mailbox for pedidos email")
+    return _info_mailbox()
 
 
 # ---------------------------------------------------------------------------
 # Core send
 # ---------------------------------------------------------------------------
 
-def _send(to_email: str, subject: str, html: str, text: str = "") -> bool:
-    sender = f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM}>"
+def _send(to_email: str, subject: str, html: str, text: str = "", mailbox: MailboxKind = "info") -> bool:
+    box = _mailbox(mailbox)
 
     if not settings.EMAIL_ENABLED:
-        logger.info("Email suppressed (EMAIL_ENABLED=False) to=%s subject=%r", to_email, subject)
+        logger.info("Email suppressed (EMAIL_ENABLED=False) mailbox=%s to=%s subject=%r", mailbox, to_email, subject)
         return True
 
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
-        msg["From"] = sender
+        msg["From"] = box.sender
         msg["To"] = to_email
         if text:
             msg.attach(MIMEText(text, "plain", "utf-8"))
         msg.attach(MIMEText(html, "html", "utf-8"))
 
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+        with smtplib.SMTP(box.host, box.port) as server:
             server.ehlo()
             server.starttls()
-            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            server.sendmail(settings.EMAIL_FROM, [to_email], msg.as_string())
+            server.login(box.user, box.password)
+            server.sendmail(box.from_email, [to_email], msg.as_string())
 
-        logger.info("Email sent to=%s subject=%r", to_email, subject)
+        logger.info("Email sent mailbox=%s to=%s subject=%r", mailbox, to_email, subject)
         return True
     except Exception:
-        logger.error("Email failed to=%s subject=%r", to_email, subject, exc_info=True)
+        logger.error("Email failed mailbox=%s to=%s subject=%r", mailbox, to_email, subject, exc_info=True)
         return False
 
 
@@ -56,20 +114,21 @@ def _send_with_attachment(
     attachment_bytes: bytes,
     attachment_filename: str,
     text: str = "",
+    mailbox: MailboxKind = "info",
 ) -> bool:
-    sender = f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM}>"
+    box = _mailbox(mailbox)
 
     if not settings.EMAIL_ENABLED:
         logger.info(
-            "Email suppressed (EMAIL_ENABLED=False) to=%s subject=%r attachment=%s",
-            to_email, subject, attachment_filename,
+            "Email suppressed (EMAIL_ENABLED=False) mailbox=%s to=%s subject=%r attachment=%s",
+            mailbox, to_email, subject, attachment_filename,
         )
         return True
 
     try:
         msg = MIMEMultipart("mixed")
         msg["Subject"] = subject
-        msg["From"] = sender
+        msg["From"] = box.sender
         msg["To"] = to_email
 
         body = MIMEMultipart("alternative")
@@ -82,16 +141,16 @@ def _send_with_attachment(
         pdf_part.add_header("Content-Disposition", "attachment", filename=attachment_filename)
         msg.attach(pdf_part)
 
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+        with smtplib.SMTP(box.host, box.port) as server:
             server.ehlo()
             server.starttls()
-            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            server.sendmail(settings.EMAIL_FROM, [to_email], msg.as_string())
+            server.login(box.user, box.password)
+            server.sendmail(box.from_email, [to_email], msg.as_string())
 
-        logger.info("Email with attachment sent to=%s subject=%r", to_email, subject)
+        logger.info("Email with attachment sent mailbox=%s to=%s subject=%r", mailbox, to_email, subject)
         return True
     except Exception:
-        logger.error("Email with attachment failed to=%s subject=%r", to_email, subject, exc_info=True)
+        logger.error("Email with attachment failed mailbox=%s to=%s subject=%r", mailbox, to_email, subject, exc_info=True)
         return False
 
 
@@ -373,7 +432,7 @@ def send_order_confirmation(data: OrderEmailData) -> bool:
         f"Puedes ver los detalles en: {order_url}"
     )
 
-    return _send(data.to_email, subject, html, text)
+    return _send(data.to_email, subject, html, text, mailbox="pedidos")
 
 
 # ---------------------------------------------------------------------------
@@ -383,8 +442,8 @@ def send_order_confirmation(data: OrderEmailData) -> bool:
 class EmailService:
 
     @staticmethod
-    def send_email(to_email: str, subject: str, html_content: str, text_content: str = "") -> bool:
-        return _send(to_email, subject, html_content, text_content)
+    def send_email(to_email: str, subject: str, html_content: str, text_content: str = "", mailbox: MailboxKind = "info") -> bool:
+        return _send(to_email, subject, html_content, text_content, mailbox=mailbox)
 
     @classmethod
     def send_welcome_email(cls, to_email: str, first_name: str) -> bool:
@@ -433,6 +492,7 @@ class EmailService:
             to_email,
             f"Pedido {order_number} confirmado · CremaCuadrado",
             _wrap_layout(inner),
+            mailbox="pedidos",
         )
 
     @classmethod
@@ -453,7 +513,41 @@ class EmailService:
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#6B6456;">Pedido <strong>{order_number}</strong> · Entrega estimada: 2–4 días hábiles</p>
           {tracking_block}
         """
-        return _send(to_email, f"Tu pedido {order_number} ha sido enviado · CremaCuadrado", _wrap_layout(inner))
+        return _send(to_email, f"Tu pedido {order_number} ha sido enviado · CremaCuadrado", _wrap_layout(inner), mailbox="pedidos")
+
+    @classmethod
+    def send_payment_failed_email(
+        cls, to_email: str, order_number: str, customer_name: str, error_message: Optional[str] = None
+    ) -> bool:
+        """Notify the customer that their payment could not be processed."""
+        retry_url = f"{settings.SITE_URL}/carrito"
+        reason_block = ""
+        if error_message:
+            reason_block = f"""
+              <div style="margin:16px 0 0;padding:16px;background-color:#FDECEA;border-radius:6px;border:1px solid #f5c6c0;">
+                <p style="margin:0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
+                  <strong style="color:#7B1716;">Motivo:</strong> {error_message}
+                </p>
+              </div>"""
+        inner = f"""
+          <h2 style="margin:0 0 12px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">No hemos podido procesar tu pago</h2>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+            Hola <strong>{customer_name}</strong>, ha habido un problema al cobrar tu pedido <strong>{order_number}</strong>.
+            No te preocupes, no se te ha realizado ningún cargo y tus productos siguen reservados en el carrito.
+          </p>
+          {reason_block}
+          {_btn(retry_url, "Reintentar el pago")}
+          <p style="margin-top:24px;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
+            Si el problema persiste, escríbenos a
+            <a href="mailto:pedidos@cremacuadrado.com" style="color:#7B1716;">pedidos@cremacuadrado.com</a>.
+          </p>
+        """
+        return _send(
+            to_email,
+            f"Problema con el pago de tu pedido {order_number} · CremaCuadrado",
+            _wrap_layout(inner),
+            mailbox="pedidos",
+        )
 
     @classmethod
     def send_order_status_update_email(
@@ -475,7 +569,7 @@ class EmailService:
           </div>
           {_btn(settings.SITE_URL + "/account/orders", "Ver mis pedidos")}
         """
-        return _send(to_email, f"Pedido {order_number} — {label} · CremaCuadrado", _wrap_layout(inner))
+        return _send(to_email, f"Pedido {order_number} — {label} · CremaCuadrado", _wrap_layout(inner), mailbox="pedidos")
 
     @classmethod
     def send_admin_new_order(
@@ -523,6 +617,7 @@ class EmailService:
             settings.ADMIN_EMAIL,
             f"[CremaCuadrado] Nuevo pedido {order_number} — {total:.2f} €",
             _wrap_layout(inner),
+            mailbox="pedidos",
         )
 
     @classmethod
@@ -547,6 +642,7 @@ class EmailService:
             settings.ADMIN_EMAIL,
             f"[CremaCuadrado] Pedido {order_number} — {label}",
             _wrap_layout(inner),
+            mailbox="pedidos",
         )
 
     @classmethod
@@ -622,4 +718,5 @@ def send_invoice_email(
         html=_wrap_layout(inner),
         attachment_bytes=pdf_bytes,
         attachment_filename=pdf_filename,
+        mailbox="pedidos",
     )

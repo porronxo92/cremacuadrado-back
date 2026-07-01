@@ -53,17 +53,28 @@ class Settings(BaseSettings):
     DEFAULT_PAGE_SIZE: int = 12
     MAX_PAGE_SIZE: int = 100
     
-    # Email — set EMAIL_ENABLED=True and configure SMTP to send real emails
-    # Gmail: SMTP_HOST=smtp.gmail.com, SMTP_PORT=587, SMTP_USER=tu@gmail.com
-    #        SMTP_PASSWORD=app-password-16-chars (Google Account › Security › App passwords)
+    # Email — set EMAIL_ENABLED=True to send real emails.
+    # Two mailboxes route outgoing mail by category (see app/services/email.py):
+    #   Pedidos@cremacuadrado.com — confirmación de pedido, fallo de pago, envío, factura
+    #   Info@cremacuadrado.com    — bienvenida, verificación, newsletter, contacto, B2B, y todo lo demás
     EMAIL_ENABLED: bool = False
-    EMAIL_FROM: str = "info@cremacuadrado.com"
-    EMAIL_FROM_NAME: str = "CremaCuadrado"
-    SMTP_HOST: str = "smtp.gmail.com"
-    SMTP_PORT: int = 587
-    SMTP_USER: str = ""
-    SMTP_PASSWORD: str = ""
     SITE_URL: str = "http://localhost:4200"
+
+    # Pedidos@cremacuadrado.com — sin credenciales propias todavía, cae en Info@ (ver app/services/email.py)
+    SMTP_PEDIDOS_HOST: str = "smtp.titan.email"
+    SMTP_PEDIDOS_PORT: int = 587
+    SMTP_PEDIDOS_USER: str = ""
+    SMTP_PEDIDOS_PASSWORD: str = ""
+    SMTP_PEDIDOS_FROM_EMAIL: str = "pedidos@cremacuadrado.com"
+    SMTP_PEDIDOS_FROM_NAME: str = "CremaCuadrado Pedidos"
+
+    # Info@cremacuadrado.com
+    SMTP_INFO_HOST: str = "smtp.titan.email"
+    SMTP_INFO_PORT: int = 587
+    SMTP_INFO_USER: str = ""
+    SMTP_INFO_PASSWORD: str = ""
+    SMTP_INFO_FROM_EMAIL: str = "info@cremacuadrado.com"
+    SMTP_INFO_FROM_NAME: str = "CremaCuadrado"
     
     # Admin
     ADMIN_EMAIL: str = "admin@cremacuadrado.com"
