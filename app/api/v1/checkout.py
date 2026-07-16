@@ -52,9 +52,9 @@ async def get_shipping_cost(
         ).filter(Cart.id == cart.id).first()
         subtotal = cart.subtotal
     
-    # Calculate discount
+    # Calculate discount — coupons only apply to logged-in users' carts
     discount = Decimal('0')
-    if cart and cart.coupon_code:
+    if cart and cart.coupon_code and current_user:
         coupon = db.query(Coupon).filter(
             Coupon.code == cart.coupon_code,
             Coupon.is_active == True
@@ -141,15 +141,19 @@ async def validate_checkout(
     # Calculate totals
     subtotal = cart.subtotal
     
-    # Discount
+    # Discount — coupons are a logged-in benefit only, so they can't be used
+    # by guests even if a code is passed directly in the request body.
     discount = Decimal('0')
     if checkout_data.coupon_code or cart.coupon_code:
-        coupon_code = checkout_data.coupon_code or cart.coupon_code
-        coupon = db.query(Coupon).filter(
-            Coupon.code == coupon_code.upper()
-        ).first()
-        if coupon and coupon.is_valid and subtotal >= coupon.min_order_amount:
-            discount = coupon.calculate_discount(subtotal)
+        if not current_user:
+            errors.append("Inicia sesión o crea una cuenta para utilizar cupones de descuento")
+        else:
+            coupon_code = checkout_data.coupon_code or cart.coupon_code
+            coupon = db.query(Coupon).filter(
+                Coupon.code == coupon_code.upper()
+            ).first()
+            if coupon and coupon.is_valid and subtotal >= coupon.min_order_amount:
+                discount = coupon.calculate_discount(subtotal)
     
     subtotal_after_discount = subtotal - discount
     

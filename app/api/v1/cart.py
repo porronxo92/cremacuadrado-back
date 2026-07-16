@@ -128,7 +128,7 @@ def cart_to_response(cart: Cart, db: Session) -> CartResponse:
 
     discount = Decimal('0')
     coupon_info = None
-    if cart.coupon_code:
+    if cart.coupon_code and cart.user_id:
         coupon = db.query(Coupon).filter(
             Coupon.code == cart.coupon_code, Coupon.is_active == True
         ).first()
@@ -319,9 +319,21 @@ def apply_coupon(
     cart_session: Optional[str] = Cookie(None),
     x_cart_session: Optional[str] = Header(None, alias="X-Cart-Session"),
 ):
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Inicia sesión o crea una cuenta para utilizar cupones de descuento"
+        )
+
     session_id = cart_session or x_cart_session
     cart = get_or_create_cart(db, current_user, session_id)
     cart = _load_cart(db, cart.id)
+
+    if cart.coupon_code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ya tienes un cupón aplicado. Quítalo antes de aplicar otro."
+        )
 
     coupon = db.query(Coupon).filter(Coupon.code == coupon_data.code.upper()).first()
     if not coupon:
