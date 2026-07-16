@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     
     # Shipping (MVP: fixed price)
     SHIPPING_COST: float = 4.95
-    FREE_SHIPPING_THRESHOLD: float = 50.0
+    FREE_SHIPPING_THRESHOLD: float = 48.0
     
     # Tax
     TAX_RATE: float = 0.21  # 21% IVA

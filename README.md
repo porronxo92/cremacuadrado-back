@@ -154,7 +154,7 @@ La API queda disponible en `http://127.0.0.1:8000`.
 | `DEBUG` | No | `True` | Activa `/docs` y `/redoc` |
 | `CORS_ORIGINS` | No | `["http://localhost:4200"]` | Orígenes permitidos en CORS |
 | `SHIPPING_COST` | No | `4.95` | Coste de envío fijo (€) |
-| `FREE_SHIPPING_THRESHOLD` | No | `50.0` | Umbral envío gratuito (€) |
+| `FREE_SHIPPING_THRESHOLD` | No | `48.0` | Umbral envío gratuito (€) |
 | `TAX_RATE` | No | `0.21` | Tipo de IVA |
 | `EMAIL_ENABLED` | No | `False` | Activa envío real de emails |
 | `EMAIL_FROM` | No | `info@cremacuadrado.com` | Dirección remitente |
