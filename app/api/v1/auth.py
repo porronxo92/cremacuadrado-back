@@ -73,8 +73,14 @@ async def register(request: Request, user_data: UserCreate, db: DbSession):
     db.commit()
 
     logger.info("New user registered: email=%s", user.email)
-    EmailService.send_welcome_email(user.email, user.first_name)
-    EmailService.send_email_verification(user.email, user.first_name, ev_token.token)
+    if not EmailService.send_welcome_email(user.email, user.first_name):
+        logger.error("Welcome email failed: email=%s", user.email)
+    else:
+        logger.info("Welcome email sent: email=%s", user.email)
+    if not EmailService.send_email_verification(user.email, user.first_name, ev_token.token):
+        logger.error("Verification email failed: email=%s", user.email)
+    else:
+        logger.info("Verification email sent: email=%s", user.email)
 
     return user
 
@@ -198,7 +204,10 @@ async def google_auth(request: Request, data: GoogleAuthRequest, db: DbSession):
             lead.converted_at = datetime.now(timezone.utc)
             db.commit()
 
-        EmailService.send_welcome_email(user.email, user.first_name)
+        if not EmailService.send_welcome_email(user.email, user.first_name):
+            logger.error("Google welcome email failed: email=%s", user.email)
+        else:
+            logger.info("Google welcome email sent: email=%s", user.email)
 
     if not user.is_active:
         raise HTTPException(
@@ -302,7 +311,10 @@ async def forgot_password(request: Request, data: ForgotPassword, db: DbSession)
         db.add(reset_token)
         db.commit()
 
-        EmailService.send_password_reset_email(user.email, token)
+        if not EmailService.send_password_reset_email(user.email, token):
+            logger.error("Password reset email failed: email=%s", user.email)
+        else:
+            logger.info("Password reset email sent: email=%s", user.email)
 
     # Always return success to prevent email enumeration
     return Message(message="Si el email existe, recibirás un enlace para restablecer tu contraseña")
@@ -332,7 +344,10 @@ async def reset_password(request: Request, data: ResetPassword, db: DbSession):
     reset_token.used = True
     db.commit()
 
-    EmailService.send_security_notification(user.email, user.first_name, "restablecimiento de contraseña")
+    if not EmailService.send_security_notification(user.email, user.first_name, "restablecimiento de contraseña"):
+        logger.error("Security notification email failed: email=%s event=password_reset", user.email)
+    else:
+        logger.info("Security notification sent: email=%s event=password_reset", user.email)
     return Message(message="Contraseña actualizada correctamente")
 
 

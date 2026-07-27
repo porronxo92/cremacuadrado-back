@@ -1,0 +1,710 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "API for the generation of labels, CN22 and CN23 documents",
+    "description": "<b>ENGLISH:</b><br> The API offers services for the generation of labels corresponding to national and international shipments, as well as CN22, CN23, DCAF and DDP documentation.<br> <b>ESPAÑOL:</b> <br> La API ofrece servicios para la generación de etiquetas correspondientes a envíos nacionales e internacionales, así como documentación CN22, CN23, DCAF y DDP.<br> ",
+    "version": "v1"
+  },
+  "host": "api1.correos.es",
+  "basePath": "/support/labels/api/v1/",
+  "schemes": [
+    "https"
+  ],
+  "paths": {
+    "/labels/print": {
+      "post": {
+        "operationId": "labelsprintpost",
+        "description": "Print labels and customs documentation (CN22, CN23). As input it has the shipping codes for which the label needs to be obtained, label type (label, customs documentation or all), the output format (PDF, ZPL or XML), the format of printing (A4, label maker) and the starting position of the first label. As output, the labels of all unified shipments will be obtained in a PDF or ZPL based 64. It will also be possible to obtain the label data in XML format for customization by the client.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "Authorization",
+            "description": "Used to send a valid OAuth 2 access token",
+            "required": true,
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "x-amf-mediaType": "application/json",
+            "in": "body",
+            "name": "generated",
+            "schema": {
+              "$ref": "#/definitions/labelsRequestTagType"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "headers": {
+              "Content-Type": {
+                "description": "content type",
+                "type": "string"
+              }
+            },
+            "x-amf-mediaType": "application/json",
+            "schema": {
+              "$ref": "#/definitions/labelsResponseTagType"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "Content-Type": {
+                "description": "content type",
+                "type": "string"
+              }
+            },
+            "x-amf-mediaType": "application/json",
+            "schema": {
+              "$ref": "#/definitions/error400"
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "Content-Type": {
+                "description": "content type",
+                "type": "string"
+              }
+            },
+            "x-amf-mediaType": "application/json",
+            "schema": {
+              "$ref": "#/definitions/error401"
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "Content-Type": {
+                "description": "content type",
+                "type": "string"
+              }
+            },
+            "x-amf-mediaType": "application/json",
+            "schema": {
+              "$ref": "#/definitions/error403"
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "Content-Type": {
+                "description": "content type",
+                "type": "string"
+              }
+            },
+            "x-amf-mediaType": "application/json",
+            "schema": {
+              "$ref": "#/definitions/error404"
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "Content-Type": {
+                "description": "content type",
+                "type": "string"
+              }
+            },
+            "x-amf-mediaType": "application/json",
+            "schema": {
+              "$ref": "#/definitions/error500"
+            }
+          }
+        }
+      }
+    },
+    "/documents/print": {
+      "post": {
+        "operationId": "documentsprintpost",
+        "description": "Documentation printing (DCAF and DDP). As input, it receives data such as the contract number and the customer number, address, town, postal code, number of shipments, the place of signature, ID of the signatory and name of the signatory. As output, the DCAF or DDP document will be obtained in PDF format in base 64.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "x-amf-mediaType": "application/json",
+            "in": "body",
+            "name": "generated",
+            "schema": {
+              "$ref": "#/definitions/labelsRequestDcafType"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "headers": {
+              "Content-Type": {
+                "description": "content type",
+                "type": "string"
+              }
+            },
+            "x-amf-mediaType": "application/json",
+            "schema": {
+              "$ref": "#/definitions/labelsResponseDcafType"
+            }
+          },
+          "400": {
+            "description": "BadRequest",
+            "headers": {
+              "Content-Type": {
+                "description": "content type",
+                "type": "string"
+              }
+            },
+            "x-amf-mediaType": "application/json",
+            "schema": {
+              "$ref": "#/definitions/error400"
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "Content-Type": {
+                "description": "content type",
+                "type": "string"
+              }
+            },
+            "x-amf-mediaType": "application/json",
+            "schema": {
+              "$ref": "#/definitions/error401"
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "Content-Type": {
+                "description": "content type",
+                "type": "string"
+              }
+            },
+            "x-amf-mediaType": "application/json",
+            "schema": {
+              "$ref": "#/definitions/error403"
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "Content-Type": {
+                "description": "content type",
+                "type": "string"
+              }
+            },
+            "x-amf-mediaType": "application/json",
+            "schema": {
+              "$ref": "#/definitions/error404"
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "Content-Type": {
+                "description": "content type",
+                "type": "string"
+              }
+            },
+            "x-amf-mediaType": "application/json",
+            "schema": {
+              "$ref": "#/definitions/error500"
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "labelsRequestTagType": {
+      "example": {
+        "application": "APPNAME",
+        "documentationType": 0,
+        "print": {
+          "labelOrderType": 2,
+          "labelFormat": 2,
+          "labelPrintMode": 1,
+          "labelPrintInitialPosition": 1,
+          "shipments": [
+            "PK10YS9800069360128108B"
+          ]
+        }
+      },
+      "type": "object",
+      "required": [
+        "documentationType"
+      ],
+      "properties": {
+        "application": {
+          "description": "Application invoking the operation",
+          "example": "APPNAME",
+          "type": "string"
+        },
+        "documentationType": {
+          "description": "Shipment label type to be print  1 (label), 2 (CN22, CN23), 0 (all types)",
+          "example": 1,
+          "type": "number"
+        },
+        "print": {
+          "description": "Label print information",
+          "type": "object",
+          "required": [
+            "shipments",
+            "labelFormat",
+            "labelPrintMode"
+          ],
+          "properties": {
+            "shipments": {
+              "description": "Shipment list",
+              "example": [
+                "PK10YS9800069340128108D",
+                "PK10YS9800069350128108X",
+                "PK10YS9800069360128108B"
+              ],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "labelOrderType": {
+              "description": "Indicates how the label type generated  will be sorted.  1 (addressee.internationalDestinyPoBox), 2 (addressee.company), 3 (addressee.lastName1), 4 (package.packageId), 5 (package.clientReference)",
+              "example": 2,
+              "type": "number"
+            },
+            "clientLogo": {
+              "description": "Base 64 image of the client's logo. It should only be indicated for pallet delivery (XPPCCOOF)",
+              "example": "ZWplbXBsbw==",
+              "type": "string"
+            },
+            "labelFormat": {
+              "description": "Indicates if the generation will be in XML (1), PDF (2) or ZPL (3). For customs documentation CN22 and CN23, only PDF format is permitted.",
+              "example": 2,
+              "type": "number"
+            },
+            "labelPrintInitialPosition": {
+              "description": "Starting position of the first label",
+              "example": 1,
+              "type": "number"
+            },
+            "labelPrintMode": {
+              "description": "Indicate whether the generation will be done in A4 format (1) or labeler (2).",
+              "example": 1,
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "labelsResponseTagType": {
+      "x-amf-examples": {
+        "ok": {
+          "pdf": "pdfBase64",
+          "error": ""
+        }
+      },
+      "type": "object",
+      "properties": {
+        "pdf": {
+          "description": "PDF document in base 64",
+          "example": "JVBERi0xLjQKJeLjz9MKMiAwIG9iago8PC9GaWx0ZXIvRmxhdGVEZWNvZGUvTGVuZ3RoIDY3MT4+c3RyZWFtCkiJdFPRatswFH039B/...",
+          "type": "string"
+        },
+        "zpl": {
+          "description": "ZPL document in base 64",
+          "example": "lhBIF5GTzIsMl5BREIsMF5HRkEsMTE2ODkyLDExNjg5MiwxMDIsICw6Ojo6Ojo6Ojo6Ojo6Ojo6Ojo6Ojo6Ojo6OjptTDAJRzEJR0YJRzhKMAlHM00w...",
+          "type": "string"
+        },
+        "xml": {
+          "description": "XML with shipping data",
+          "example": "<?xml version=\\\"1.0\\\" encoding=\\\"UTF-8\\\" standalone=\\\"yes\\\"?><RespuestaPreregistroEnvio>    <CodExpedicion>PK10YS980006936T</CodExpedicion>    <FechaRespuesta>13-01-2023 11:15:10</FechaRespuesta>    <TotalBultos>1</TotalBultos>    <Bulto>        <NumBulto>1</NumBulto>        <CodEnvio>PK10YS9800069340128108D</CodEnvio>        <Etiqueta>            <Etiqueta_xml>                <RemitenteEtiqueta>                    <Nombre>Nombre Remitente Apellido 1 Remitente Apellido 2 Remitente</Nombre>                    <Direccion>CJ Albarracin  N:25 Ptal.:PR Esc.:C Bq.:BR Pl.:4 Pta.:Izda</Direccion>                    <Localidad>Madrid</Localidad>                    <Provincia>01</Provincia>                    <PersonaContacto>Luicito</PersonaContacto>                    <CP>28037</CP>                </RemitenteEtiqueta>                <DestinatarioEtiqueta>                    <Nombre>nombre apel1 dest envio 1 apel2 dest envio 1</Nombre>                    <Direccion>CJ Albarracin  N:25 Ptal.:PR Esc.:ww Bq.:BR Pl.:ss Pta.:Izda direcc2</Direccion>                    <Localidad>Madrid</Localidad>                    <Provincia>01</Provincia>                    <CP>35001</CP>                    <ZIP>28037</ZIP>                    <Pais>ES</Pais>                    <PersonaContacto>Amanda</PersonaContacto>                    <Telefono>917775544</Telefono>                </DestinatarioEtiqueta>                <Referencia>RefCli1</Referencia>                <PesoReal>20500</PesoReal>                <PesoVol>0.161</PesoVol>                <Observaciones>Observciones paq 2</Observaciones>                <FechaEtiquetado>13-01-2023</FechaEtiquetado>                <CodigoBarras>                    <NombreF>PK10YS9800069350128108X.jpg</NombreF>                    <Fichero>iVBORw0KGgoAAAANSUhEUgAAAdIAAACbCAMAAADhnuoUAAADAFBMVEUAAAAAADMAAGYAAJkAAMwAAP8AMwAAMzMAM2YAM5kAM8wAM/8AZgAAZjMAZmYAZpkAZswAZv8AmQAAmTMAmWYAmZkAmcwAmf8AzAAAzDMAzGYAzJkAzMwAzP8A/wAA/zMA/2YA/5kA/8wA//8zAAAzADMzAGYzAJkzAMwzAP8zMwAzMzMzM2YzM5kzM8wzM/8zZgAzZjMzZmYzZpkzZswzZv8zmQAzmTMzmWYzmZkzmcwzmf8zzAAzzDMzzGYzzJkzzMwzzP8z/wAz/zMz/2Yz/5kz/8wz//9mAABmADNmAGZmAJlmAMxmAP9mMwBmMzNmM2ZmM5lmM8xmM/9mZgBmZjNmZmZmZplmZsxmZv9mmQBmmTNmmWZmmZlmmcxmmf9mzABmzDNmzGZmzJlmzMxmzP9m/wBm/zNm/2Zm/5lm/8xm//+ZAACZADOZAGaZAJmZAMyZAP+ZMwCZMzOZM2aZM5mZM8yZM/+ZZgCZZjOZZmaZZpmZZsyZZv+ZmQCZmTOZmWaZmZmZmcyZmf+ZzACZzDOZzGaZzJmZzMyZzP+Z/wCZ/zOZ/2aZ/5mZ/8yZ///MAADMADPMAGbMAJnMAMzMAP/MMwDMMzPMM2bMM5nMM8zMM//MZgDMZjPMZmbMZpnMZszMZv/MmQDMmTPMmWbMmZnMmczMmf/MzADMzDPMzGbMzJnMzMzMzP/M/wDM/zPM/2bM/5nM/8zM////AAD/ADP/AGb/AJn/AMz/AP//MwD/MzP/M2b/M5n/M8z/M///ZgD/ZjP/Zmb/Zpn/Zsz/Zv//mQD/mTP/mWb/mZn/mcz/mf//zAD/zDP/zGb/zJn/zMz/zP///wD//zP//2b//5n//8z///8SEhIYGBgeHh4kJCQqKiowMDA2NjY8PDxCQkJISEhOTk5UVFRaWlpgYGBmZmZsbGxycnJ4eHh+fn6EhISKioqQkJCWlpacnJyioqKoqKiurq60tLS6urrAwMDGxsbMzMzS0tLY2Nje3t7k5OTq6urw8PD29vb8/PwgKWLDAAAB2UlEQVR4Xu3RgW3CMBBA0bTbsP8wXacEF12cigW+3pNIwMLORf/rePo5Hs/P8Xc9PV7Xc33u1+vsWf9du9f6Oue+uj9h3/v53HXG9cRPq/us822fZL/P2+4nrLU5d97juvM+z/vcmev/06/P3uecp63vp5lhpr2/xXuy2f39+k2IpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDmS5kiaI2mOpDm/oApANtzktVYAAAAASUVORK5CYI==</Fichero>                </CodigoBarras>                <VA>                    <PEE>N</PEE>                </VA>            </Etiqueta_xml>        </Etiqueta>    </Bulto></RespuestaPreregistroEnvio>,<?xml version=\\\"1.0\\\" encoding=\\\"UTF-8\\\" standalone=\\\"yes\\\"?><RespuestaPreregistroEnvio>    <CodExpedicion>PK10YS980006936T</CodExpedicion>    <FechaRespuesta>13-01-2023 11:15:10</FechaRespuesta>    <TotalBultos>1</TotalBultos>    <Bulto>        <NumBulto>1</NumBulto>        <CodEnvio>PK10YS9800069360128108B</CodEnvio>        <Etiqueta>            <Etiqueta_xml>                <RemitenteEtiqueta>                    <Nombre>Nombre Remitente Apellido 1 Remitente Apellido 2 Remitente</Nombre>                    <Direccion>CJ Albarracin  N:25 Ptal.:PR Esc.:C Bq.:BR Pl.:4 Pta.:Izda</Direccion>                    <Localidad>Madrid</Localidad>                    <Provincia>52</Provincia>                    <PersonaContacto>Luicito</PersonaContacto>                    <CP>28037</CP>                </RemitenteEtiqueta>                <DestinatarioEtiqueta>                    <Nombre>nombre apel1 dest envio 1 apel2 dest envio 1</Nombre>                    <Direccion>CJ Albarracin  N:25 Ptal.:PR Esc.:ww Bq.:BR Pl.:ss Pta.:Izda direcc2</Direccion>                    <Localidad>Madrid</Localidad>                    <Provincia>28</Provincia>                    <CP>35001</CP>                    <ZIP>28037</ZIP>                    <Pais>ES</Pais>                    <PersonaContacto>Amanda</PersonaContacto>                    <Telefono>917775544</Telefono>                </DestinatarioEtiqueta>                <Referencia>RefCli1</Referencia>                <PesoReal>205</PesoReal>                <PesoVol>0.161</PesoVol>                <Observaciones>Observciones paq 2</Observaciones>                <FechaEtiquetado>13-01-2023</FechaEtiquetado>                <CodigoBarras>                    <NombreF>PQ26CSXX00000100135001D.jpg</NombreF>                    <Fichero>iVBORw0KGgoAAAANSUhEUgAAAdIAAACbCAMAAADhnuoUAAADAFBMVEUAAAAAADMAAGYAAJkAAMwAAP8AMwAAMzMAM2YAM5kAM8wAM/8AZgAAZjMAZmYAZpkAZswAZv8AmQAAmTMAmWYAmZkAmcwAmf8AzAAAzDMAzGYAzJkAzMwAzP8A/wAA/zMA/2YA/5kA/8wA//8zAAAzADMzAGYzAJkzAMwzAP8zMwAzMzMzM2YzM5kzM8wzM/8zZgAzZjMzZmYzZpkzZswzZv8zmQAzmTMzmWYzmZkzmcwzmf8zzAAzzDMzzGYzzJkzzMwzzP8z/wAz/zMz/2Yz/5kz/8wz//9mAABmADNmAGZmAJlmAMxmAP9mMwBmMzNmM2ZmM5lmM8xmM/9mZgBmZjNmZmZmZplmZsxmZv9mmQBmmTNmmWZmmZlmmcxmmf9mzABmzDNmzGZmzJlmzMxmzP9m/wBm/zNm/2Zm/5lm/8xm//+ZAACZADOZAGaZAJmZAMyZAP+ZMwCZMzOZM2aZM5mZM8yZM/+ZZgCZZjOZZmaZZpmZZsyZZv+ZmQCZmTOZmWaZmZmZmcyZmf+ZzACZzDOZzGaZzJmZzMyZzP+Z/wCZ/zOZ/2aZ/5mZ/8yZ///MAADMADPMAGbMAJnMAMzMAP/MMwDMMzPMM2bMM5nMM8zMM//MZgDMZjPMZmbMZpnMZszMZv/MmQDMmTPMmWbMmZnMmczMmf/MzADMzDPMzGbMzJnMzMzMzP/M/wDM/zPM/2bM/5nM/8zM////AAD/ADP/AGb/AJn/AMz/AP//MwD/MzP/M2b/M5n/M8z/M///ZgD/ZjP/Zmb/Zpn/Zsz/Zv//mQD/mTP/mWb/mZn/mcz/mf//zAD/zDP/zGb/zJn/zMz/zP///wD//zP//2b//5n//8z///8SEhIYGBgeHh4kJCQqKiowMDA2NjY8PDxCQkJISEhOTk5UVFRaWlpgYGBmZmZsbGxycnJ4eHh+fn6EhISKioqQkJCWlpacnJyioqKoqKiurq60tLS6urrAwMDGxsbMzMzS0tLY2Nje3t7k5OTq6urw8PD29vb8/PwgKWLDAAAB0UlEQVR4Xu3Riw2CMABAQXQb9x/GdRTRtEUmuLxL5NOWQny37e25Pd6/7XvcPT7HfXycx/FYtc6N+2Of8+j6hnmPefer/Y/r86rz6Pqt42r9knG+Hr2e/V+zzq2z47v+n513OFbMe8z/2+8t531/53l0N56+f+4DKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSmnpJySckrKKSnnBZgKQDZejWr8AAAAAElFTkSuQm==</Fichero>                </CodigoBarras>                <VA>                    <ComplejidadGestion>2</ComplejidadGestion>                    <PEE>N</PEE>                </VA>            </Etiqueta_xml>        </Etiqueta>    </Bulto></RespuestaPreregistroEnvio>",
+          "type": "string"
+        },
+        "error": {
+          "description": "Error description in case of any validation error",
+          "example": "El/Los envío(s) identificado(s) por el/los código(s) PK10YS9800069360128108B no se encuentra(n) registrado(s)",
+          "type": "string"
+        }
+      }
+    },
+    "error400": {
+      "example": {
+        "code": "400",
+        "message": "Bad request",
+        "moreInformation": {
+          "description": "The request was bad",
+          "link": "www.correos.es"
+        }
+      },
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "HTTP status code",
+          "example": "400",
+          "type": "string"
+        },
+        "message": {
+          "description": "HTTP Status message",
+          "example": "The request was bad",
+          "type": "string"
+        },
+        "moreInformation": {
+          "description": "Additional error information",
+          "type": "object",
+          "required": [
+            "link",
+            "description"
+          ],
+          "properties": {
+            "link": {
+              "description": "Source link",
+              "example": "www.correos.es",
+              "type": "string"
+            },
+            "description": {
+              "description": "Description message",
+              "example": "HTTP POST on resource 'http://ptres-back-service.admision-ptres-p-ri:8080/ptres/api/v1/delivery' failed: internal server error (500).",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "error401": {
+      "example": {
+        "code": "401",
+        "message": "Unauthorized",
+        "moreInformation": {
+          "description": "The credentials are invalid",
+          "link": "www.correos.es"
+        }
+      },
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "HTTP status code",
+          "example": "401",
+          "type": "string"
+        },
+        "message": {
+          "description": "HTTP Status message",
+          "example": "Unauthorized",
+          "type": "string"
+        },
+        "moreInformation": {
+          "description": "Additional error information",
+          "type": "object",
+          "required": [
+            "link",
+            "description"
+          ],
+          "properties": {
+            "link": {
+              "description": "Source link",
+              "example": "www.correos.es",
+              "type": "string"
+            },
+            "description": {
+              "description": "Description message",
+              "example": "HTTP POST on resource 'http://ptres-back-service.admision-ptres-p-ri:8080/ptres/api/v1/delivery' failed: internal server error (500).",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "error403": {
+      "example": {
+        "code": "403",
+        "message": "Forbidden",
+        "moreInformation": {
+          "description": "The operation is forbidden",
+          "link": "www.correos.es"
+        }
+      },
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "HTTP status code",
+          "example": "403",
+          "type": "string"
+        },
+        "message": {
+          "description": "HTTP Status message",
+          "example": "Forbidden",
+          "type": "string"
+        },
+        "moreInformation": {
+          "description": "Additional error information",
+          "type": "object",
+          "required": [
+            "link",
+            "description"
+          ],
+          "properties": {
+            "link": {
+              "description": "Source link",
+              "example": "www.correos.es",
+              "type": "string"
+            },
+            "description": {
+              "description": "Description message",
+              "example": "HTTP POST on resource 'http://ptres-back-service.admision-ptres-p-ri:8080/ptres/api/v1/delivery' failed: internal server error (500).",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "error404": {
+      "example": {
+        "code": "404",
+        "message": "Not found",
+        "moreInformation": {
+          "description": "The resource you are trying to reach was not found",
+          "link": "www.correos.es"
+        }
+      },
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "HTTP status code",
+          "example": "404",
+          "type": "string"
+        },
+        "message": {
+          "description": "HTTP Status message",
+          "example": "Not found",
+          "type": "string"
+        },
+        "moreInformation": {
+          "description": "Additional error information",
+          "type": "object",
+          "required": [
+            "link",
+            "description"
+          ],
+          "properties": {
+            "link": {
+              "description": "Source link",
+              "example": "www.correos.es",
+              "type": "string"
+            },
+            "description": {
+              "description": "Description message",
+              "example": "HTTP POST on resource 'http://ptres-back-service.admision-ptres-p-ri:8080/ptres/api/v1/delivery' failed: internal server error (500).",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "error500": {
+      "example": {
+        "code": "500",
+        "message": "Server error",
+        "moreInformation": {
+          "description": "There was an error on the server end",
+          "link": "www.correos.es"
+        }
+      },
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "HTTP status code",
+          "example": "500",
+          "type": "string"
+        },
+        "message": {
+          "description": "HTTP status message",
+          "example": "There was an error on the server end",
+          "type": "string"
+        },
+        "moreInformation": {
+          "description": "Additional error information",
+          "type": "object",
+          "required": [
+            "link",
+            "description"
+          ],
+          "properties": {
+            "link": {
+              "description": "Source link",
+              "example": "www.correos.es",
+              "type": "string"
+            },
+            "description": {
+              "description": "Description message",
+              "example": "HTTP POST on resource 'http://ptres-back-service.admision-ptres-p-ri:8080/ptres/api/v1/delivery' failed: internal server error (500).",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "labelsRequestDcafType": {
+      "example": {
+        "application": "APPNAME",
+        "documentationType": 5,
+        "documentData": {
+          "contractNumber": "12345678",
+          "clientNumber": "98765432",
+          "addresseeName": "Maria Garcia Garcia",
+          "destinationName": "España",
+          "destinationCode": "ES",
+          "shipmentsNumber": "3",
+          "signaturePlace": "Madrid",
+          "signatoryDNI": "34567890G",
+          "signatoryName": "Jose Garcia Garcia"
+        }
+      },
+      "type": "object",
+      "required": [
+        "documentationType"
+      ],
+      "properties": {
+        "application": {
+          "description": "Application invoking the operation",
+          "example": "APPNAME",
+          "type": "string"
+        },
+        "documentationType": {
+          "description": "Documentation type to be printed DCAF (5) or DDP (6)",
+          "example": 5,
+          "type": "number"
+        },
+        "documentData": {
+          "description": "Document information",
+          "type": "object",
+          "required": [
+            "destinationName"
+          ],
+          "properties": {
+            "shipmentsNumber": {
+              "description": "Shipments number to be printed in document",
+              "example": "3",
+              "type": "string"
+            },
+            "destinationCode": {
+              "description": "Destination code, the value will be the zip code or a country code",
+              "example": "ES",
+              "type": "string"
+            },
+            "destinationName": {
+              "description": "Destination name, the value will be the name of a province or a country",
+              "example": "España",
+              "type": "string"
+            },
+            "signatoryName": {
+              "description": "Signatory name to be printed",
+              "example": "Jose Garcia Garcia",
+              "type": "string"
+            },
+            "addresseeName": {
+              "description": "Addressee Name to be printed in document",
+              "example": "Maria Garcia Garcia",
+              "type": "string"
+            },
+            "signatoryDNI": {
+              "description": "Signatory DNI to be printed",
+              "example": "34567890G",
+              "type": "string"
+            },
+            "clientNumber": {
+              "description": "Client number to be printed in document",
+              "example": "98765432",
+              "type": "string"
+            },
+            "signaturePlace": {
+              "description": "Signature place",
+              "example": "Madrid",
+              "type": "string"
+            },
+            "contractNumber": {
+              "description": "Contract number to be printed in document",
+              "example": "12345678",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "labelsResponseDcafType": {
+      "x-amf-examples": {
+        "ok": {
+          "pdf": "base64",
+          "error": ""
+        }
+      },
+      "type": "object",
+      "properties": {
+        "pdf": {
+          "description": "PDF document in base 64",
+          "example": "JVBERi0xLjQKJeLjz9MKMiAwIG9iago8PC9GaWx0ZXIvRmxhdGVEZWNvZGUvTGVuZ3RoIDY3MT4+c3RyZWFtCkiJdFPRatswFH039B/...",
+          "type": "string"
+        },
+        "error": {
+          "description": "Error description",
+          "example": "Error",
+          "type": "string"
+        }
+      }
+    },
+    "items": {
+      "type": "object",
+      "required": [
+        "documentationType",
+        "request"
+      ],
+      "properties": {
+        "entryDate": {
+          "description": "Document generation date. <table><thead><th>Size</th><th>Type</th><th>Required</th></thead><tbody><tr><td></td><td>String</td><td>Yes</td></tr></tbody></table>",
+          "example": "16/08/2023",
+          "type": "string"
+        },
+        "shipment": {
+          "description": "Shipment code. <table><thead><th>Size</th><th>Type</th><th>Required</th></thead><tbody><tr><td></td><td>String</td><td>Yes</td></tr></tbody></table>",
+          "example": "PK10YS9800069340128108D",
+          "type": "string"
+        },
+        "documentationType": {
+          "description": "Shipment label type to be print  1 (label), 2 (CN22, CN23), 0 (all types) <table><thead><th>Size</th><th>Type</th><th>Required</th></thead><tbody><tr><td></td><td>Number</td><td>No</td></tr></tbody></table>",
+          "example": 1,
+          "type": "number"
+        },
+        "request": {
+          "description": "Input JSON request. <table><thead><th>Size</th><th>Type</th><th>Required</th></thead><tbody><tr><td></td><td>JSON</td><td>Yes</td></tr></tbody></table>",
+          "example": {
+            "application": "APPNAME",
+            "documentationType": 0,
+            "print": {
+              "labelOrderType": 2,
+              "labelFormat": 2,
+              "labelPrintMode": 1,
+              "labelPrintInitialPosition": 1,
+              "shipments": [
+                "PK10YS9800069360128108B"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "response": {
+          "description": "Output JSON request. <table><thead><th>Size</th><th>Type</th><th>Required</th></thead><tbody><tr><td></td><td>JSON</td><td>No</td></tr></tbody></table>",
+          "example": {
+            "pdf": "pdfBase64",
+            "error": ""
+          },
+          "type": "object"
+        }
+      }
+    }
+  }
+}

@@ -87,10 +87,12 @@ async def lifespan(app: FastAPI):
 
     try:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from app.services.correos.tracking import poll_active_shipments
         scheduler = AsyncIOScheduler()
         scheduler.add_job(_cancel_ghost_orders, "interval", minutes=5, id="ghost_order_cleanup")
+        scheduler.add_job(poll_active_shipments, "interval", minutes=60, id="correos_tracking_poll")
         scheduler.start()
-        logger.info("Scheduler started — ghost order cleanup every 5 min")
+        logger.info("Scheduler started — ghost orders (5min) + tracking poll (60min)")
         yield
         scheduler.shutdown(wait=False)
     except Exception as exc:

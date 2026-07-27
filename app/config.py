@@ -112,12 +112,25 @@ class Settings(BaseSettings):
     # Correos España — set CORREOS_ENABLED=True with a signed contract to call the real API.
     # While False, shipment creation runs in mock mode (returns a fake localizador).
     CORREOS_ENABLED: bool = False
-    CORREOS_CLIENT_ID: str = ""
-    CORREOS_CLIENT_SECRET: str = ""
+    # CorreosID OAuth2 credentials (portal identidad.correos.es)
+    CORREOS_CLIENT_ID: str = ""  # "Cuenta de Cliente de Sistemas" (e.g. W81468585AJDD)
+    CORREOS_CLIENT_SECRET: str = ""  # Contraseña de la app en CorreosID portal
+    CORREOS_ID: str = ""  # UUID de la aplicación CorreosID (client_id real para token OAuth2)
+    # API Gateway credentials (portal developers.correos.es)
+    CLIENT_ID_API: str = ""
+    CLIENT_SECRET_API: str = ""
+    # Contract data
     CORREOS_NUM_CONTRATO: str = ""
     CORREOS_NUM_SOLICITANTE: str = ""
-    CORREOS_OAUTH_URL: str = "https://apioauthcid.correos.es/cid/oauth2/v1/token"
-    CORREOS_API_BASE: str = "https://apicorp.correos.es"
+    CODIGO_ETIQUETADOR: str = ""
+    # URLs — PRE: https://api-test.correos.es  PRO: https://api1.correos.es
+    # CorreosID OAuth2 endpoint: https://apioauthcid.correos.es/Api/Authorize/Token
+    CORREOS_OAUTH_URL: str = ""
+    CORREOS_API_BASE: str = "https://api1.correos.es"
+    # Scope for CorreosID token — leave empty if not required by your subscription
+    CORREOS_SCOPE: str = ""
+    # SSL verification — False for PRE/dev with self-signed certs, True for production
+    CORREOS_VERIFY_SSL: bool = True
     CORREOS_SERVICE_CODE: str = "S0103"  # Paq Estándar (2–3 días hábiles)
     CORREOS_DEFAULT_WEIGHT_GRAMS: int = 500  # fallback if variant weight is missing
     # Remitente (datos de la tienda para el preregistro)

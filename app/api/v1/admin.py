@@ -23,7 +23,7 @@ from app.api.deps import DbSession, AdminUser
 from app.models.user import User
 from app.models.product import Product, Category, Review, ProductVariant, ProductImage
 from app.models.order import Order, OrderItem
-from app.models.shipment import Shipment
+from app.models.shipment import Shipment, ShipmentEvent
 from app.schemas.order import OrderResponse, OrderStatusUpdate
 from app.schemas.product import ProductResponse, ProductVariantResponse
 from app.schemas.admin import DashboardStats
@@ -341,19 +341,27 @@ def _do_update_order_status(order_id: int, status_data: OrderStatusUpdate, db, a
     if old_status != status_data.status:
         # Notify customer
         if status_data.status == "shipped" and order.tracking_number:
-            EmailService.send_order_shipped_email(
+            sent = EmailService.send_order_shipped_email(
                 to_email=customer_email,
                 order_number=order.order_number,
                 customer_name=customer_name,
                 tracking_number=order.tracking_number,
             )
+            if not sent:
+                logger.error("Order shipped email failed: order=%s to=%s", order.order_number, customer_email)
+            else:
+                logger.info("Order shipped email sent: order=%s to=%s", order.order_number, customer_email)
         elif customer_email:
-            EmailService.send_order_status_update_email(
+            sent = EmailService.send_order_status_update_email(
                 to_email=customer_email,
                 order_number=order.order_number,
                 customer_name=customer_name,
                 new_status=status_data.status,
             )
+            if not sent:
+                logger.error("Order status update email failed: order=%s status=%s to=%s", order.order_number, status_data.status, customer_email)
+            else:
+                logger.info("Order status update email sent: order=%s status=%s to=%s", order.order_number, status_data.status, customer_email)
 
     return OrderResponse(
         id=order.id,
@@ -421,6 +429,16 @@ def get_order_shipment(order_id: int, db: DbSession, admin_user: AdminUser):
             "correos_tracking_url": correos_url,
             "created_at": shipment.created_at,
             "updated_at": shipment.updated_at,
+            "events": [
+                {
+                    "id": ev.id,
+                    "code": ev.code,
+                    "description": ev.description,
+                    "status": ev.status,
+                    "occurred_at": ev.occurred_at,
+                }
+                for ev in (shipment.events or [])
+            ],
         }
     }
 
@@ -458,6 +476,125 @@ def update_tracking_number(
         item_count=order.item_count, created_at=order.created_at,
         paid_at=order.paid_at, shipped_at=order.shipped_at, delivered_at=order.delivered_at,
     )
+
+
+# ── Correos shipping: Labels, Tracking, Pickups ──────────────────────
+
+
+@router.get("/orders/{order_id}/label")
+def get_order_label(order_id: int, db: DbSession, admin_user: AdminUser):
+    """Download the shipping label PDF for an order."""
+    from app.services.correos.labels import get_label_pdf
+
+    shipment = db.query(Shipment).filter(Shipment.order_id == order_id).first()
+    if not shipment or not shipment.localizador:
+        raise HTTPException(status_code=404, detail="No hay envío prerregistrado para este pedido")
+
+    try:
+        pdf_bytes = get_label_pdf(shipment.localizador)
+    except Exception as exc:
+        logger.error("Label generation failed for order %d: %s", order_id, exc)
+        raise HTTPException(status_code=502, detail=f"Error al generar etiqueta: {exc}")
+
+    filename = f"etiqueta_{shipment.localizador}.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/orders/{order_id}/tracking/sync")
+def sync_order_tracking(order_id: int, db: DbSession, admin_user: AdminUser):
+    """Force a tracking sync for an order's shipment (queries Correos trackpub)."""
+    from app.services.correos.tracking import sync_tracking_for_shipment
+
+    shipment = db.query(Shipment).filter(Shipment.order_id == order_id).first()
+    if not shipment or not shipment.localizador:
+        raise HTTPException(status_code=404, detail="No hay envío prerregistrado para este pedido")
+
+    try:
+        new_events = sync_tracking_for_shipment(db, shipment)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.error("Tracking sync failed for order %d: %s", order_id, exc)
+        raise HTTPException(status_code=502, detail=f"Error al consultar tracking: {exc}")
+
+    return {
+        "new_events": new_events,
+        "status": shipment.status,
+        "events": [
+            {
+                "id": ev.id,
+                "code": ev.code,
+                "description": ev.description,
+                "status": ev.status,
+                "occurred_at": ev.occurred_at,
+            }
+            for ev in shipment.events
+        ],
+    }
+
+
+@router.post("/shipping/pickup")
+def request_shipping_pickup(
+    db: DbSession,
+    admin_user: AdminUser,
+    pickup_date: Optional[str] = Query(None, description="Fecha de recogida (YYYY-MM-DD). Por defecto mañana."),
+    estimated_shipments: int = Query(1, description="Número estimado de paquetes"),
+    observations: str = Query("", description="Observaciones para el repartidor"),
+):
+    """Request a package pickup from Correos at the configured sender address."""
+    from app.services.correos.pickups import request_pickup as _request_pickup
+    from datetime import date
+
+    parsed_date = None
+    if pickup_date:
+        try:
+            parsed_date = date.fromisoformat(pickup_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Formato de fecha inválido. Usa YYYY-MM-DD")
+
+    try:
+        result = _request_pickup(
+            pickup_date=parsed_date,
+            estimated_shipments=estimated_shipments,
+            observations=observations,
+        )
+    except Exception as exc:
+        logger.error("Pickup request failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Error al solicitar recogida: {exc}")
+
+    return {"pickup": result}
+
+
+@router.post("/orders/{order_id}/cancel-shipment")
+def cancel_order_shipment(order_id: int, db: DbSession, admin_user: AdminUser):
+    """Cancel the preregistered shipment for an order (before Correos picks it up)."""
+    from app.services.correos.preregister import cancel_shipment as _cancel
+
+    shipment = db.query(Shipment).filter(Shipment.order_id == order_id).first()
+    if not shipment or not shipment.localizador:
+        raise HTTPException(status_code=404, detail="No hay envío prerregistrado para este pedido")
+
+    if shipment.status in ("delivered", "returned", "cancelled"):
+        raise HTTPException(status_code=409, detail=f"El envío ya está en estado '{shipment.status}'")
+
+    try:
+        result = _cancel(shipment.localizador)
+    except Exception as exc:
+        logger.error("Shipment cancel failed for order %d: %s", order_id, exc)
+        raise HTTPException(status_code=502, detail=f"Error al anular envío: {exc}")
+
+    shipment.status = "cancelled"
+    shipment.updated_at = datetime.now(timezone.utc)
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order:
+        order.shipping_status = "cancelled"
+    db.commit()
+
+    return {"message": "Envío anulado", "correos_response": result}
 
 
 @router.get("/orders/export/csv")

@@ -1,6 +1,7 @@
 """
 Users API endpoints - Profile, Addresses.
 """
+import logging
 import re
 from typing import List
 
@@ -16,6 +17,8 @@ from app.schemas.user import (
 from app.schemas.common import Message
 from app.utils.security import get_password_hash, verify_password
 from app.services.email import EmailService
+
+logger = logging.getLogger("cremacuadrado.users")
 
 router = APIRouter()
 
@@ -78,7 +81,10 @@ async def change_password(
     current_user.token_version = getattr(current_user, "token_version", 0) + 1
     db.commit()
 
-    EmailService.send_security_notification(current_user.email, current_user.first_name, "cambio de contraseña")
+    if not EmailService.send_security_notification(current_user.email, current_user.first_name, "cambio de contraseña"):
+        logger.error("Security notification email failed: email=%s event=password_change", current_user.email)
+    else:
+        logger.info("Security notification sent: email=%s event=password_change", current_user.email)
     return Message(message="Contraseña actualizada correctamente")
 
 

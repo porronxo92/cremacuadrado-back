@@ -14,3 +14,11 @@ class PosLeadRequest(BaseModel):
     establishment_type: str = Field(..., min_length=1, max_length=50)
     email: EmailStr
     phone: str = Field(..., min_length=1, max_length=30)
+
+
+class ContactFormRequest(BaseModel):
+    """Payload from the /contacto contact form."""
+    name: str = Field(..., min_length=2, max_length=255)
+    email: EmailStr
+    message: str = Field(..., min_length=10, max_length=5000)
+    accepts_marketing: bool = False

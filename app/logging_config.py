@@ -85,21 +85,34 @@ def setup_logging(debug: bool = False) -> None:
     """Call once at application startup."""
     level = logging.DEBUG if debug else logging.INFO
 
+    root = logging.getLogger()
+
+    # Guard against duplicate handler registration on uvicorn --reload
+    # (the module can be re-imported in the same process on hot-reload)
+    for existing_handler in list(root.handlers):
+        if isinstance(existing_handler, logging.StreamHandler) and getattr(existing_handler, "_cremacuadrado", False):
+            return  # already configured in this process — skip
+
     handler = logging.StreamHandler(sys.stdout)
+    handler._cremacuadrado = True  # marker so the guard above can identify our handler
     handler.addFilter(_RequestIdFilter())
     handler.setFormatter(_DevFormatter() if debug else _JsonFormatter())
 
-    root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)
     root.setLevel(level)
 
-    # Third-party loggers — avoid log spam
-    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)   # we log requests ourselves
-    logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
-    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    # Third-party loggers — quiet in production to avoid spam, but maximally
+    # verbose in local dev (DEBUG=True) for full observability: SQL statements,
+    # outbound HTTP calls (Stripe/Correos/email), and scheduled job runs.
+    # uvicorn.access stays WARNING in both modes — we log every request
+    # ourselves (with request_id, duration, status) so uvicorn's own line
+    # would just be a noisier duplicate, not extra information.
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.error").setLevel(logging.INFO if debug else logging.WARNING)
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)  # SQL statements — too noisy, not needed
     logging.getLogger("apscheduler.scheduler").setLevel(logging.INFO)
-    logging.getLogger("apscheduler.executors").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("stripe").setLevel(logging.WARNING)
-    logging.getLogger("passlib").setLevel(logging.WARNING)
+    logging.getLogger("apscheduler.executors").setLevel(logging.INFO if debug else logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.INFO if debug else logging.WARNING)
+    logging.getLogger("stripe").setLevel(logging.INFO if debug else logging.WARNING)
+    logging.getLogger("passlib").setLevel(logging.WARNING)  # bcrypt internals — never useful

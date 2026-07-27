@@ -1,6 +1,7 @@
 """
 Orders API endpoints.
 """
+import logging
 from typing import List
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
@@ -14,6 +15,8 @@ from app.schemas.order import OrderResponse, OrderListResponse, OrderItemRespons
 from app.schemas.common import Message, PaginatedResponse
 from app.utils.url import normalize_image_url
 from app.config import settings
+
+logger = logging.getLogger("cremacuadrado.orders")
 
 router = APIRouter()
 
@@ -255,15 +258,22 @@ def request_invoice(
     customer_email = current_user.email
 
     def _send_invoice():
-        from app.services.invoice import generate_invoice_pdf
-        from app.services.email import send_invoice_email
-        pdf_bytes = generate_invoice_pdf(order, customer_name, customer_email)
-        send_invoice_email(
-            to_email=customer_email,
-            first_name=current_user.first_name or customer_name,
-            order_number=order_number,
-            pdf_bytes=pdf_bytes,
-        )
+        try:
+            from app.services.invoice import generate_invoice_pdf
+            from app.services.email import send_invoice_email
+            pdf_bytes = generate_invoice_pdf(order, customer_name, customer_email)
+            sent = send_invoice_email(
+                to_email=customer_email,
+                first_name=current_user.first_name or customer_name,
+                order_number=order_number,
+                pdf_bytes=pdf_bytes,
+            )
+            if not sent:
+                logger.error("Invoice email failed: order=%s to=%s", order_number, customer_email)
+            else:
+                logger.info("Invoice email sent: order=%s to=%s", order_number, customer_email)
+        except Exception as exc:
+            logger.error("Invoice email error: order=%s to=%s error=%s", order_number, customer_email, exc, exc_info=True)
 
     background_tasks.add_task(_send_invoice)
     return Message(message=f"Factura enviada a {customer_email}")

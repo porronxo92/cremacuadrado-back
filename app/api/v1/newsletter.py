@@ -5,7 +5,7 @@ be used later for a "finish signing up" reminder, and sends the welcome coupon.
 """
 import logging
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 
 from app.api.deps import DbSession
 from app.limiter import limiter
@@ -30,8 +30,11 @@ async def subscribe(request: Request, data: NewsletterSubscribeRequest, db: DbSe
 
     existing = db.query(NewsletterLead).filter(NewsletterLead.email == email).first()
     if existing:
-        logger.info("Newsletter subscribe: email already captured email=%s", email)
-        return Message(message="Ya tienes tu código de descuento en el email")
+        logger.info("Newsletter subscribe: email already captured, returning 409 email=%s", email)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="already_subscribed",
+        )
 
     coupon = db.query(Coupon).filter(Coupon.code == WELCOME_COUPON_CODE).first()
     coupon_code = coupon.code if coupon else WELCOME_COUPON_CODE
@@ -43,6 +46,8 @@ async def subscribe(request: Request, data: NewsletterSubscribeRequest, db: DbSe
     sent = EmailService.send_newsletter_welcome_email(email, coupon_code)
     if not sent:
         logger.error("Newsletter welcome email failed: email=%s", email)
+    else:
+        logger.info("Newsletter welcome email sent: email=%s coupon=%s", email, coupon_code)
 
     logger.info("Newsletter lead captured: email=%s coupon=%s", email, coupon_code)
     return Message(message="Revisa tu email para ver tu código de descuento")

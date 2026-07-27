@@ -147,6 +147,26 @@ def _update_pi_status(db: Session, stripe_pi_id: str, new_status: str) -> None:
         pi.updated_at = datetime.now(timezone.utc)
 
 
+def handle_payment_succeeded(db: Session, stripe_pi_id: str) -> None:
+    """
+    Public entry point for processing a succeeded PaymentIntent.
+    Called by both the Stripe webhook handler and the confirmation endpoint
+    (fallback for local dev or delayed webhooks).
+    Idempotent: skips processing if the order is already paid.
+    """
+    _handle_payment_succeeded(db, {"id": stripe_pi_id})
+
+
+def handle_payment_succeeded(db: Session, stripe_pi_id: str) -> None:
+    """
+    Public entry point for processing a succeeded PaymentIntent.
+    Called by both the Stripe webhook handler and the confirmation endpoint
+    (fallback for local dev or delayed webhooks).
+    Idempotent: skips processing if the order is already paid.
+    """
+    _handle_payment_succeeded(db, {"id": stripe_pi_id})
+
+
 def _handle_payment_succeeded(db: Session, data: dict) -> None:
     from app.models.product import Product
 
@@ -199,10 +219,12 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
         if coupon:
             coupon.used_count += 1
 
-    # Clear cart (cart_id is stored in PI metadata)
+    # Clear cart — primary: use cart_id stored in PI metadata.
+    # Fallback: clear by user_id (covers orders created before metadata was saved).
     pi_record = db.query(PaymentIntentModel).filter(
         PaymentIntentModel.stripe_payment_intent_id == stripe_pi_id
     ).first()
+    cart_cleared = False
     if pi_record and pi_record.metadata_:
         cart_id_str = pi_record.metadata_.get("cart_id")
         if cart_id_str:
@@ -210,6 +232,15 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
             if cart:
                 db.query(CartItem).filter(CartItem.cart_id == cart.id).delete()
                 cart.coupon_code = None
+                cart_cleared = True
+                logger.info("Cart cleared via metadata: cart_id=%s order=%s", cart_id_str, order.order_number)
+    if not cart_cleared and order.user_id:
+        # Fallback: clear the authenticated user's active cart
+        cart = db.query(Cart).filter(Cart.user_id == order.user_id).first()
+        if cart:
+            db.query(CartItem).filter(CartItem.cart_id == cart.id).delete()
+            cart.coupon_code = None
+            logger.info("Cart cleared via user_id fallback: user_id=%s order=%s", order.user_id, order.order_number)
 
     # Generate Correos shipment (defensive: must NOT break payment processing).
     # In mock mode (CORREOS_ENABLED=False) this returns a fake localizador.

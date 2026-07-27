@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.api.deps import DbSession, CurrentUserOptional
 from app.models.cart import Cart, CartItem
 from app.models.product import Product, ProductVariant
-from app.models.order import Coupon
+from app.models.order import Coupon, Order
 from app.models.user import User
 from app.schemas.cart import (
     CartResponse, CartItemCreate, CartItemUpdate, CartItemResponse,
@@ -133,13 +133,28 @@ def cart_to_response(cart: Cart, db: Session) -> CartResponse:
             Coupon.code == cart.coupon_code, Coupon.is_active == True
         ).first()
         if coupon and coupon.is_valid:
-            discount = coupon.calculate_discount(subtotal)
-            coupon_info = CouponInfo(
-                code=coupon.code,
-                discount_type=coupon.discount_type,
-                discount_value=coupon.discount_value,
-                discount_amount=discount,
-            )
+            # Per-user check: remove the coupon if this user already completed
+            # an order with it (prevents reuse of single-use welcome coupons).
+            already_used = db.query(Order).filter(
+                Order.user_id == cart.user_id,
+                Order.coupon_code == cart.coupon_code,
+                Order.status.in_(['paid', 'processing', 'shipped', 'delivered']),
+            ).first()
+            if already_used:
+                cart.coupon_code = None
+                db.commit()
+            else:
+                discount = coupon.calculate_discount(subtotal)
+                coupon_info = CouponInfo(
+                    code=coupon.code,
+                    discount_type=coupon.discount_type,
+                    discount_value=coupon.discount_value,
+                    discount_amount=discount,
+                )
+        else:
+            # Coupon no longer valid globally — remove it from the cart silently
+            cart.coupon_code = None
+            db.commit()
 
     shipping_cost, shipping_message = calculate_shipping(subtotal - discount)
 

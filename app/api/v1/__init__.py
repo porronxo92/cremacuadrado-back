@@ -13,6 +13,7 @@ from app.api.v1.webhooks import router as webhooks_router
 from app.api.v1.newsletter import router as newsletter_router
 from app.api.v1.leads import router as leads_router
 from app.api.v1.points_of_sale import router as points_of_sale_router
+from app.api.v1.contact import router as contact_router
 
 router = APIRouter()
 
@@ -28,3 +29,4 @@ router.include_router(webhooks_router, prefix="/webhooks", tags=["Webhooks"])
 router.include_router(newsletter_router, prefix="/newsletter", tags=["Newsletter"])
 router.include_router(leads_router, prefix="/leads", tags=["Leads B2B"])
 router.include_router(points_of_sale_router, prefix="/points-of-sale", tags=["Points of Sale"])
+router.include_router(contact_router, prefix="/contact", tags=["Contact"])

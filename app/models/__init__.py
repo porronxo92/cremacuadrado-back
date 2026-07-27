@@ -8,6 +8,7 @@ from app.models.shipment import Shipment, ShipmentEvent
 from app.models.blog import BlogPost, BlogCategory
 from app.models.lead import NewsletterLead
 from app.models.pos_lead import PosLead
+from app.models.contact_lead import ContactLead
 
 __all__ = [
     "Base",
@@ -32,4 +33,5 @@ __all__ = [
     "BlogCategory",
     "NewsletterLead",
     "PosLead",
+    "ContactLead",
 ]

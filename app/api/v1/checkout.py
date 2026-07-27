@@ -3,6 +3,7 @@ Checkout API endpoints.
 """
 from decimal import Decimal
 from typing import Optional
+import logging
 import uuid
 from datetime import datetime
 
@@ -25,6 +26,7 @@ from app.services import stripe_service
 from app.config import settings
 from app.utils.url import normalize_image_url
 
+logger = logging.getLogger("cremacuadrado.checkout")
 router = APIRouter()
 
 
@@ -273,12 +275,17 @@ async def create_payment_intent(
         )
     except stripe_lib.StripeError as e:
         db.rollback()
+        logger.error(
+            "Stripe PaymentIntent creation failed: order=%s amount=%s error=%s",
+            order.order_number, amount_cents, e, exc_info=True,
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Error al conectar con el sistema de pago: {e.user_message or str(e)}"
         )
 
-    # Persist PaymentIntent record
+    # Persist PaymentIntent record — store cart_id in metadata so the
+    # payment webhook can clear the correct cart on fulfillment.
     pi_record = PaymentIntentModel(
         order_id=order.id,
         stripe_payment_intent_id=intent.id,
@@ -286,6 +293,7 @@ async def create_payment_intent(
         amount=amount_cents,
         currency=settings.STRIPE_CURRENCY,
         status=intent.status,
+        metadata_={"cart_id": str(cart.id)},
     )
     db.add(pi_record)
 
@@ -293,6 +301,11 @@ async def create_payment_intent(
     order.payment_intent_id = intent.id
 
     db.commit()
+
+    logger.info(
+        "PaymentIntent created: order=%s pi=%s amount=%s",
+        order.order_number, intent.id, amount_cents,
+    )
 
     return PaymentIntentResponse(
         payment_intent_id=intent.id,
@@ -328,6 +341,7 @@ async def complete_checkout(
     ).first()
 
     if not pi_record:
+        logger.warning("complete_checkout: PaymentIntent record not found pi=%s", complete_data.payment_intent_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Registro de pago no encontrado"
@@ -337,12 +351,20 @@ async def complete_checkout(
     try:
         stripe_pi = stripe_lib.PaymentIntent.retrieve(complete_data.payment_intent_id)
     except stripe_lib.StripeError as e:
+        logger.error(
+            "complete_checkout: Stripe retrieve failed pi=%s error=%s",
+            complete_data.payment_intent_id, e, exc_info=True,
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Error al verificar el pago con Stripe"
         )
 
     if stripe_pi.status not in ("succeeded", "processing"):
+        logger.warning(
+            "complete_checkout: payment not completed pi=%s status=%s",
+            complete_data.payment_intent_id, stripe_pi.status,
+        )
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail=f"El pago no se ha completado (estado: {stripe_pi.status})"
@@ -354,6 +376,7 @@ async def complete_checkout(
     ).filter(Order.id == pi_record.order_id).first()
 
     if not order:
+        logger.error("complete_checkout: order not found for pi_record.order_id=%s", pi_record.order_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Pedido no encontrado"
@@ -361,10 +384,16 @@ async def complete_checkout(
 
     # Authorization: authenticated user must own the order
     if current_user and order.user_id and order.user_id != current_user.id:
+        logger.warning(
+            "complete_checkout: unauthorized access attempt order=%s by user=%s",
+            order.order_number, current_user.id,
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acceso no autorizado"
         )
+
+    logger.info("Order confirmed: order=%s pi=%s status=%s", order.order_number, complete_data.payment_intent_id, stripe_pi.status)
 
     return OrderResponse(
         id=order.id,
@@ -416,6 +445,26 @@ async def get_order_confirmation(
 
     if not is_owner and not has_pi_proof:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso no autorizado")
+
+    # Fallback: if the order is still pending_payment but Stripe has already charged
+    # the customer, process the fulfillment inline.
+    # This covers: (a) local dev without Stripe CLI, (b) delayed webhook delivery.
+    if order.status == "pending_payment" and order.payment_intent_id:
+        try:
+            stripe_pi = stripe_lib.PaymentIntent.retrieve(order.payment_intent_id)
+            if stripe_pi.status == "succeeded":
+                logger.info(
+                    "confirmation fallback: processing succeeded PI inline order=%s pi=%s",
+                    order_number, order.payment_intent_id,
+                )
+                from app.api.v1.webhooks import handle_payment_succeeded
+                handle_payment_succeeded(db, order.payment_intent_id)
+                db.refresh(order)
+        except Exception as exc:
+            logger.warning(
+                "confirmation fallback failed: order=%s error=%s",
+                order_number, exc, exc_info=True,
+            )
 
     return OrderResponse(
         id=order.id,

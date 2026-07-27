@@ -732,6 +732,56 @@ class EmailService:
         )
 
     @classmethod
+    def send_contact_form_confirmation(cls, to_email: str, name: str) -> bool:
+        """Confirm receipt of a /contacto form submission to the sender."""
+        inner = f"""
+          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">¡Gracias por escribirnos, {name}!</h2>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+            Hemos recibido tu mensaje y te responderemos lo antes posible en este mismo email.
+            Normalmente contestamos en menos de <strong>24&nbsp;horas</strong>.
+          </p>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+            Mientras tanto, puedes seguirnos en redes sociales o echar un vistazo a nuestro catálogo.
+          </p>
+          {_btn(settings.SITE_URL + "/catalogo", "Ver productos")}
+        """
+        return _send(to_email, "Hemos recibido tu mensaje · CremaCuadrado", _wrap_layout(inner))
+
+    @classmethod
+    def send_admin_contact_form(
+        cls,
+        name: str,
+        email: str,
+        message: str,
+        accepts_marketing: bool,
+    ) -> bool:
+        """Notify info@ of a new contact form submission."""
+        marketing_label = "Sí" if accepts_marketing else "No"
+        inner = f"""
+          <h2 style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Nuevo mensaje de contacto</h2>
+          <p style="margin:0 0 24px;font-family:Arial,sans-serif;font-size:15px;color:#6B6456;">
+            Formulario recibido desde /contacto
+          </p>
+          <table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
+            <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#6B6456;width:160px;">Nombre</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;color:#1C1A14;">{name}</td></tr>
+            <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#6B6456;">Email</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;color:#1C1A14;">{email}</td></tr>
+            <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#6B6456;">Acepta comunicaciones</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;color:#1C1A14;">{marketing_label}</td></tr>
+            <tr><td style="padding:8px;vertical-align:top;color:#6B6456;">Mensaje</td>
+                <td style="padding:8px;color:#1C1A14;white-space:pre-wrap;">{message}</td></tr>
+          </table>
+          {_btn("mailto:" + email, "Responder")}
+        """
+        return _send(
+            settings.SMTP_INFO_FROM_EMAIL,
+            f"[CremaCuadrado] Nuevo contacto — {name}",
+            _wrap_layout(inner),
+            mailbox="info",
+        )
+
+    @classmethod
     def send_email_verification(cls, to_email: str, first_name: str, token: str) -> bool:
         """Send email address verification link."""
         verify_url = f"{settings.SITE_URL}/auth/verify-email?token={token}"

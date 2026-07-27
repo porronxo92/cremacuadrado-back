@@ -67,14 +67,16 @@ def create_shipment_for_order(db: Session, order: Order) -> Shipment | None:
 
     try:
         result = preregister_shipment(order_full, weight_grams)
-        shipment.localizador = result["localizador"]
+        # package_code is the individual tracking code used for labels and tracking
+        localizador = result.get("package_code") or result.get("shipment_code", "")
+        shipment.localizador = localizador
         shipment.correos_request = result.get("request")
         shipment.correos_response = result.get("response")
-        shipment.status = "label_created"
+        shipment.status = "preregistered"
 
         # Surface tracking on the order for emails / admin / customer account
-        order.tracking_number = shipment.localizador
-        order.shipping_status = "label_created"
+        order.tracking_number = localizador
+        order.shipping_status = "preregistered"
     except Exception as exc:
         shipment.status = "failed"
         shipment.error = str(exc)

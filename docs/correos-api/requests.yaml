@@ -1,0 +1,4593 @@
+openapi: 3.0.1
+info:
+  title: requests
+  description: API MULE REQUESTS for Recogidas 2.0. This API includes
+    methods used for collection request creation, queries, and
+    modifications.<br> In all requests from the external url, the data must be
+    modified, that is, if they are post or patch, the contractMDR and clientCod
+    (contract and detailable of MDR linked to the user of postal ID with which
+    the token is used) must be passed as parameters. <br> To obtain a correosID
+    token, this is the documentation of correos id
+    https://anypoint.mulesoft.com/exchange/c9ca99ed-6681-402c-811e-5ebc907e6b46/correosid/minor/1.0/
+  contact:
+    name: Correos
+  version: v1
+servers:
+  - url: https://api1.correos.es/logistics/requests/api/v1
+security:
+  - apiKeyHeader: []
+  - apiKeyQuery: []
+paths:
+  /requests:
+    get:
+      summary: Get list of pickup requests
+      description: This method is used to query pickup requests using different query parameters detailed in the "Query Parameters" section.
+      operationId: requests-collection
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            Valid Correos Bearer Token
+          required: true
+          schema:
+            type: string
+        - name: client
+          required: false
+          example: 12314
+          in: query
+          description: Client code (Create a client for obtain a client code)
+          schema:
+            type: integer
+            format: int32
+            example: 1
+        - name: codOperativeZone
+          required: false
+          example: "01"
+          in: query
+          description: >-
+            Operating zone code
+          schema:
+            type: string
+            maxLength: 50
+            example: '01'
+        - name: codRequestCorreos
+          required: false
+          example: "SR0102202300001EH"
+          in: query
+          description: Pickup request code
+          schema:
+            type: string
+            example: SR0102202300001EH
+        - name: collectionDate
+          required: false
+          in: query
+          example: '2020-07-27'
+          description: Assigned date for pickup request
+          schema:
+            type: string
+            example: '2020-07-27'
+        - name: contract
+          required: false
+          in: query
+          example: '08000591'
+          description: MDR contract code
+          schema:
+            type: string
+            example: '08000591'
+        - name: count
+          required: false
+          in: query
+          example: 3
+          description: Count is the number of results you want to display
+          schema:
+            type: number
+            format: int32
+            example: 3
+        - name: creationUserCode
+          required: false
+          in: query
+          example: CEX
+          description: User code that created the collection request
+          schema:
+            type: string
+            example: CEX
+        - name: desReason
+          required: false
+          in: query
+          example: Cliente Ausente
+          description: "This path param describes the reason of a incident. <table>
+<tr><td>Volumen / Peso a Recoger Excesivo</td>
+<tr><td>Recogido</td>
+<tr><td>Recogidas en viaje adicional</td>
+<tr><td>Hurto o robo</td>
+<tr><td>Faltan datos</td>
+<tr><td>Enfermedad del conductor</td>
+<tr><td>Sin tiempo por error de transmisión</td>
+<tr><td>Tráfico</td>
+<tr><td>Fiesta local</td>
+<tr><td>Avería</td>
+<tr><td>Sin tiempo para efectuar el servicio</td>
+<tr><td>Error asignación / mal encaminado</td>
+<tr><td>Climatología adversa</td>
+<tr><td>Área inaccesible / acceso restringido por horario</td>
+<tr><td>Dirección incorrecta / incompleta</td></tr>
+<tr><td>Huelga</td></tr>
+<tr><td>Cliente Ausente</td></tr>
+<tr><td>Cliente sin correo</td></tr>
+<tr><td>Punto de recogida alejado del habitual</td></tr>
+<tr><td>Tiempo de espera excesivo</td></tr>
+<tr><td>Reintento imputable a cliente</td></tr>
+<tr><td>Diferencia número envíos a recoger</td></tr>
+<tr><td>Mercancia Peligrosa</td></tr>
+<tr><td>Mercancía no cargada por falta de capacidad en el vehículo</td></tr>
+<tr><td>Cita previa necesaria</td></tr>
+<tr><td>Cerrado por vacaciones</td></tr>
+<tr><td>Mercancía ya recogida</td></tr>
+<tr><td>Mal embalado</td></tr>
+<tr><td>Cliente no quiere servicio de recogida</td></tr>
+<tr><td>Falta Documentación</td></tr>
+<tr><td>Sin envios</td></tr>
+</table>"
+          schema:
+            type: string
+            example: Cliente Ausente
+        - name: direction
+          required: false
+          example: Alameda
+          in: query
+          description: >-
+            This path param indicates the address where the collection has to be
+            made
+          schema:
+            type: string
+            example: Alameda
+        - name: eid
+          required: false
+          in: query
+          example: '77383'
+          description: This path param is the identifier of a company user of CorreosIdS
+          schema:
+            type: string
+            example: '77383'
+        - name: exportCsv
+          required: false
+          in: query
+          example: false
+          description: >-
+            This path param is a flag to mark if you want the output of the
+            query in csv or normal
+          schema:
+            type: boolean
+            example: false
+        - name: internalState
+          required: false
+          in: query
+          example: ALTA_EN_UNIDAD
+          description: "This path param represents the internal state of the collection <table> <tr><td>ASIGNADO_CODIRED</td> <tr><td>CURSADA</td> <tr><td>ALTA_EN_UNIDAD</td> <tr><td>PRE_ASIGNADA_MANUAL</td> <tr><td>EN_RUTA</td> <tr><td>PENDIENTE_EN_UNIDAD</td> <tr><td>REALIZADA</td> <tr><td>NO_REALIZADA</td> <tr><td>CANCELADA</td> <tr><td>INICIAL</td> <tr><td>VIABLE_CON_CAMBIOS</td> <tr><td>NO_VIABLE</td> <tr><td>ENVIADO_EDOC</td> <tr><td>ERROR_ENVIO_EDOC</td> <tr><td>ERROR_EDOC</td> <tr><td>ENVIADO_SGIE</td> <tr><td>ERROR_ENVIO_SGIE</td> <tr><td>ERROR_SGIE</td> <tr><td>ENVIADO_SAP</td> <tr><td>ERROR_ENVIO_SAP</td> <tr><td>VIABLE</td> <tr><td>ASIGNADA</td> <tr><td>EN_REPARTO</td> </table>"
+          schema:
+            type: string
+            example: ALTA_EN_UNIDAD
+        - name: locality
+          required: false
+          in: query
+          example: ALCORCÓN
+          description: >-
+            This path param represents the locality where the collection has to
+            be made
+          schema:
+            type: string
+            example: ALCORCÓN
+        - name: modalityType
+          required: false
+          in: query
+          example: S
+          description: >-
+            This path param represents the type of the collection modality. It
+            can be standard or special. E (Special), S (Standard), F (Correos Frio), C (Citypaq), P(Pudo).
+          schema:
+            type: string
+            example: S
+        - name: offset
+          required: false
+          in: query
+          example: 10
+          description: >-
+            This path param is for pagination, it searches the database from a
+            number that must be indicated
+          schema:
+            type: integer
+            format: int32
+            example: 10
+        - name: oid
+          required: false
+          example: 92c8772e-c4c8-432c-8006-829394a76ece
+          in: query
+          description: The path param is the identifier of a particular user of CorreosId
+          schema:
+            type: string
+            example: 92c8772e-c4c8-432c-8006-829394a76ece
+        - name: orderID
+          required: false
+          example: OR0202202200003FV
+          in: query
+          description: This path param represents the order code
+          schema:
+            type: string
+            example: OR0202202200003FV
+        - name: originSystem
+          required: false
+          example: BUZONES
+          in: query
+          description: >-
+            This path param represents the system origin where the requests was
+            made
+          schema:
+            type: string
+            example: BUZONES
+        - name: postalCode 
+          required: false
+          example: '28038'
+          in: query
+          description: >-
+            This path param represents the postal code of the locality where the
+            collection is made
+          schema:
+            type: string
+            example: '28038'
+        - name: province
+          required: false
+          in: query
+          description: >-
+            This path param represents the province of the locality where the
+            collection is made
+          schema:
+            type: string
+            example: '28'
+        - name: specificContract
+          required: false
+          in: query
+          example: '123985'
+          description: This path param represents a customer contract of the client
+          schema:
+            type: string
+            example: '123985'
+        - name: state
+          required: false
+          in: query
+          example: ALTA_EN_UNIDAD
+          description: "This path param represents the status code of a collection. <table> <tr><td>ASIGNADO_CODIRED</td> <tr><td>CURSADA</td> <tr><td>ALTA_EN_UNIDAD</td> <tr><td>PRE_ASIGNADA_MANUAL</td> <tr><td>EN_RUTA</td> <tr><td>PENDIENTE_EN_UNIDAD</td> <tr><td>REALIZADA</td> <tr><td>NO_REALIZADA</td> <tr><td>CANCELADA</td> <tr><td>INICIAL</td> <tr><td>VIABLE_CON_CAMBIOS</td> <tr><td>NO_VIABLE</td> <tr><td>ASIGNADA</td> <tr><td>EN_REPARTO</td> </table>"
+          schema:
+            type: string
+            example: ALTA_EN_UNIDAD
+        - name: unit
+          required: false
+          in: query
+          example: MADRID CTA RECOGIDAS
+          description: >-
+            This path param represents the name of the unit to which a
+            collection belongs
+          schema:
+            type: string
+            example: MADRID CTA RECOGIDAS
+        - name: viability
+          required: false
+          in: query
+          example: false
+          description: 'This path param represents the state of viability of a requests '
+          schema:
+            type: boolean
+            example: false
+        - name: groupId
+          required: false
+          in: query
+          example: '12'
+          description: This path param represents the group identifier of a requests
+          schema:
+            type: string
+            example: '12'
+        - name: codRoute
+          required: false
+          in: query
+          example: '5'
+          description: This path param represents the route code of a requests
+          schema:
+            type: string
+            example: '5'
+        - name: codSection
+          required: false
+          in: query
+          example: '0101'
+          description: This path param represents the section code of a requests
+          schema:
+            type: string
+            example: '0101'
+        - name: codired
+          required: false
+          in: query
+          example: '0100004'
+          description: 'This path param represents the unit code '
+          schema:
+            type: string
+            example: '0100004'
+        - name: zone
+          required: false
+          in: query
+          example: '04'
+          description: 'This path param represents the zone code '
+          schema:
+            type: string
+            example: '04'
+        - name: isFront
+          required: false
+          in: query
+          example: false
+          description: This path param specify if is front or no
+          schema:
+            type: boolean
+            example: false
+        - name: cexCodRequest
+          required: false
+          in: query
+          example: SRPRUEBA
+          description: This path param represents the internal Cex id of the requests
+          schema:
+            type: string
+            example: SRPRUEBA
+        - name: isCbtAllowed
+          required: false
+          in: query
+          example: true
+          description: >-
+            This path param specify if CBT allowed.If the result is true, it
+            means that the cbt can be read and therefore it is a collection of
+            Cex
+          schema:
+            type: boolean
+            example: true
+        - name: 
+          required: false
+          in: query
+          example: 1  
+          description: This path param represents the order assigned
+          schema:
+            type: integer
+            example: 1    
+      responses:
+        '200':
+          description: Created sucesfully
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaResponse'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Request not found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '405':
+          description: Method not allowed exception
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error405'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+    post:
+      summary: This method add new request collection. We send the collection data
+      description: >-
+        This method is to add new sporadic requests that can be standard
+        (modality_type 'S') or special (modality_type 'E') . The difference
+        between them is the price , the standard ones have a default price and
+        the special have a different price that can be set using the json
+        property price.
+      operationId: add-request-collection
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: "Input body that contain the information to create a request\_"
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        required: true
+      responses:
+        '200':
+          description: It is not used
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        '201':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Resource or Request Collection not found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '405':
+          description: Method not allowed exception
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error405'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+      x-codegen-request-body-name: lRequest
+  /requests/acceptChanges/{id}:
+    patch:
+      summary: Accept changes
+      description: >-
+        This endpoint modifies the changes that a request has when  the
+        viability has been accepted
+      operationId: accept-changes
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the t ype of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+        - name: id
+          example: SR2023012672361EP
+          in: path
+          description: This path param represents the description identifier
+          required: true
+          schema:
+            type: string
+            example: SR2023012672361EP
+      requestBody:
+        description: Input body that update a request
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudRecogidaUpdatedDTO'
+        required: true
+      responses:
+        '200':
+          description: Accepted sucesfully
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Request not found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '405':
+          description: Method not allowed exception
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error405'
+        '409':
+          description: Conflict
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error409'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+      x-codegen-request-body-name: requestUpdated
+  /requests/batch:
+    post:
+      summary: Run shipments batch
+      description: >-
+        This endpoint processes the shipments files of shipments pending to be
+        saved in the database
+      operationId: shipment-file-processing-batch
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error200Vacio'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Resource or Request Collection not found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '405':
+          description: Method not allowed exception
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error405'
+        '409':
+          description: Conflict
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error409'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+  /requests/batchEdocumento:
+    post:
+      summary: Run send PDF to eDocumento batch
+      description: >-
+        It is a batch used to create a pdf to send it to edocumento and depends
+        on of the state of the requests send it to SGIE  
+      operationId: send-pdf-to-edocumento-batch
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+        - name: date
+          example: '2020-07-27'
+          in: query
+          description: This path param represents the date where the requests was made
+          required: true
+          schema:
+            type: string
+            example: '2020-07-27'
+        - name: state
+          in: query
+          example: ENVIADO_EDOC
+          description: "This path param represents the status code of a collection. <table> <tr><td>ASIGNADO_CODIRED</td> <tr><td>CURSADA</td> <tr><td>ALTA_EN_UNIDAD</td> <tr><td>PRE_ASIGNADA_MANUAL</td> <tr><td>EN_RUTA</td> <tr><td>PENDIENTE_EN_UNIDAD</td> <tr><td>REALIZADA</td> <tr><td>NO_REALIZADA</td> <tr><td>CANCELADA</td> <tr><td>INICIAL</td> <tr><td>VIABLE_CON_CAMBIOS</td> <tr><td>NO_VIABLE</td> <tr><td>ASIGNADA</td> <tr><td>EN_REPARTO</td> </table>"
+          required: true
+          schema:
+            type: string
+            example: ENVIADO_EDOC
+      responses:
+        '200':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content: {}
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Resource or Request Collection not found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '405':
+          description: Method not allowed exception
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error405'
+        '409':
+          description: Conflict
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error409'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+  /requests/cancelRequest/{id}:
+    patch:
+      summary: Cancel request
+      description: >-
+        This endpoint is used to cancel a requests if it is not done or already
+        cancel
+      operationId: cancel-request
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          example: SR3006202200001ET
+          description: This path param represents the description identifier
+          required: true
+          schema:
+            type: string
+            example: SR3006202200001ET
+      requestBody:
+        description: Input that have the infomation to cancel a requests
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelRequestDTO'
+        required: true
+      responses:
+        '200':
+          description: Cancelled sucesfully
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Request not found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '405':
+          description: Method not allowed exception
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error405'
+        '409':
+          description: Validation exception
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error409'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+      x-codegen-request-body-name: requestCancel
+  /requests/codired:
+    get:
+      summary: >-
+        This method is used to get the codired of a request consulting by postal
+        code
+      description: In this method, get codired of a request by postal cod
+      operationId: codired
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+        - name: estimatedVolume
+          in: query
+          example: 10
+          required: false
+          description: >-
+            This path param represents the volume that is estimated to be in
+            the requests. 10 (envelopes), 20 (small), 30 (medium), 40 (big), 50 (very big), 60 (pallets), 70 (correos xl), 80 (palletized merchandise).
+          schema:
+            type: integer
+            format: int32
+            example: 10
+        - name: postalCode
+          in: query
+          example: '28038'
+          required: false
+          description: >-
+            This path param represents the postal code of the locality where the
+            collection is made
+          schema:
+            type: string
+            example: '28038'
+        - name: requestDate
+          in: query
+          example: '2021-01-29'
+          required: false
+          description: >-
+            This path param represents the requests date where the requests
+            should be done. Must be equal to or later than the day of the petition.
+          schema:
+            type: string
+            example: '2021-01-29'
+      responses:
+        '200':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodiredResponse'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Not Found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '409':
+          description: Conflict
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error409'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+  /requests/config:
+    get:
+      summary: Get configuration table
+      description: >-
+        This method is used to get constants of a request like the max hour to
+        create a requests or the max number of requests that is dowload in a csv
+        file
+      operationId: config
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaConfigDTO'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Not Found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+  /requests/firstDayRequestDate:
+    get:
+      summary: Get the first day of request date
+      description: 'This endpoint is used to get the first day of request date '
+      operationId: first-day-request-date
+      parameters:
+        - name: Authorization 
+          example: nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: string
+                example: '3'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Not Found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+  /requests/getOperativeUnit/{codired}:
+    get:
+      summary: Get operative unit by codired
+      description: This method is used to get the operative unit consulting by codired
+      operationId: operative-unit
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+        - name: codired
+          in: path
+          example: '0100004'
+          description: This path param represents the unit code
+          required: true
+          schema:
+            type: string
+            example: '0100004'
+      responses:
+        '200':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfficesDTO'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Not Found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+  /requests/getSrByOr/{codOrdenCorreos}:
+    get:
+      summary: Get SR by OR
+      description: This method is used to get all fixed requests of an order
+      operationId: sr-by-or
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+        - name: codOrdenCorreos
+          in: path
+          description: This path param represents the order identifier
+          required: true
+          example: OR2022060827509FR
+          schema:
+            type: string
+            example: OR2022060827509FR
+      responses:
+        '200':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Not Found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+  /requests/maxDays:
+    get:
+      summary: Get the maximum number of days
+      description: >-
+        This endpoint is used to get the maximum number of days when a requests
+        can be created
+      operationId: max-days
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: string
+                example: '80'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Not Found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+  /requests/maxShipmentsBatch:
+    get:
+      summary: Get max shipments to batch
+      description: >-
+        This method returns the maximun number of pending shipments to process
+        in the shipment batch
+      operationId: max-shipments-batch
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: string
+                example: '20'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Not Found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+  /requests/modifyRequest:
+    patch:
+      summary: Update request
+      description: >-
+        Once the request is made you can modify it. This method is used to
+        update some fields of the requests like codired , postal code.. using a
+        role and also is used to change some states of the requests
+      operationId: modify-request
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: request
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudRecogidaModifyDTO'
+        required: true
+      responses:
+        '200':
+          description: Created sucesfully
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Orden not found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '405':
+          description: Method not allowed exception
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error405'
+        '409':
+          description: Conflict
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error409'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+      x-codegen-request-body-name: request
+  /requests/modifyViability/{id}:
+    patch:
+      summary: Update viability of request
+      description: >-
+        This method returns a json body containing the change in viability that
+        this method allows to make once the method has been created
+      operationId: modify-viability
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          description: This path param represents the description identifier
+          required: true
+          example: SR2022092673306EA
+          schema:
+            type: string
+            example: SR2022092673306EA
+      requestBody:
+        description: Input body containing the information to change viability
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudRecogidaViabilidadDTO'
+        required: true
+      responses:
+        '200':
+          description: Created sucesfully
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Orden not found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '405':
+          description: Method not allowed exception
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error405'
+        '409':
+          description: Conflict
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error409'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+      x-codegen-request-body-name: request
+  /requests/neo:
+    post:
+      summary: Add new request collection from NEO
+      description: This method is used to create requests from the frontend of NEO
+      operationId: add-request-neo
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: >-
+          Input body that contains the information to create requests from the
+          frontend of NEO
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AltaSolicitudNeoDTO'
+        required: true
+      responses:
+        '200':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        '201':
+          description: Created
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Not Found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '409':
+          description: Conflict
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error409'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+      x-codegen-request-body-name: request
+  /requests/reasons:
+    get:
+      summary: Get reasons
+      description: >-
+        This endpoint is to get the possibles descripcions of the reasons that
+        requests can have
+      operationId: reasons
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RazonesDTO'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Not Found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+  /requests/minimum-date:
+    get:
+      summary: getMinimunDate
+      description: >-
+        This method is used to obtain the minimum date when a requests of
+        Correos Frio can be done
+      operationId: minimun-date
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+        - name: postalCode
+          in: query
+          description: >-
+            This path param represents the postal code of the locality where the
+            collection is made
+          example: '28038'
+          required: true
+          schema:
+            type: string
+            example: '28038'
+      responses:
+        '200':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/fechaHora'                
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Not Found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+  /requests/requestCollectedPDA:
+    patch:
+      description: >-
+        This endpoint used from PDAs to give the information of the shipments of
+        a requests that have been read by a Correos operator
+      operationId: request-collected-pda
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: >-
+          Input body that contains the information to  to give the information
+          of the shipments of a requests that have been read by a Correos
+          operator from PDAs
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudRecogidaPDADTO'
+        required: true
+      responses:
+        '200':
+          description: Patch request ok
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Request not found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '405':
+          description: Method not allowed exception
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error405'
+        '409':
+          description: Conflict
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error409'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+      x-codegen-request-body-name: requestPDA
+  /requests/{id}:
+    get:
+      summary: Consult request collection by ID
+      description: >-
+        This method is used to get the detailed information of a request
+        consulting by id
+      operationId: consult-request-collection-by-id
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          example: SR2022092673306EA
+          description: This path param represents the description identifier
+          required: true
+          schema:
+            type: string
+            example: SR2022092673306EA
+      responses:
+        '200':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Not Found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+  /requests/validateRequest:
+    post:
+      summary: >-
+        Resource in charge of validating the request to make a pickup request.
+      description: >-
+        Process designed to verify collections by type of modality and date of
+        pickup.
+      operationId: validateRequest
+      requestBody:
+        description: solicitudRecogidaDTOList
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        required: true
+      responses:
+        '200':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckPickupDayModalityDTO'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Request not found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '409':
+          description: Conflict
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error409'        
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+      x-codegen-request-body-name: solicitudRecogidaDTOList
+  /requests/shipment/{id}:
+    get:
+      summary: Get last pickup request by shipment code or CBTR
+      description: >-
+        This endpoint retrieves the most recent pickup request associated to a
+        given shipment identifier. If the identifier starts with "REC" it is
+        treated as a CBTR (temporary bar code) and filtered by cod_cbtr;
+        otherwise it is treated as a Correos shipment code (codShipmentCorreos).
+        When the shipment has been associated to more than one request, the
+        response includes an oldRequests array with the codes of all previous
+        requests.
+      operationId: getRequestByShipmentOrCbtr
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          description: >-
+            Shipment identifier. If it starts with "REC" it is interpreted as a
+            CBTR code; otherwise as a Correos shipment code (codShipmentCorreos).
+          required: true
+          schema:
+            type: string
+          example: LH199678265AU
+      responses:
+        '200':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: No pickup request found for the given identifier
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+  /shipments/checkShipments:
+    post:
+      summary: check duplicated shipments
+      description: >-
+        This endpoint is used to check if the shipment introduced in one
+        requests it is duplicated
+      operationId: check-duplicated-shipment
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: >-
+          Input body containing the information to check if the shipment
+          introduced in one requests it is duplicated
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnvioDTO'
+        required: true
+      responses:
+        '200':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EnvioDTO'
+        '201':
+          description: Created
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EnvioDTO'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Resource or Request Collection not found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '405':
+          description: Method not allowed exception
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error405'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+      x-codegen-request-body-name: shipments
+  /cexpress:
+    post:
+      summary: Create new Cex request
+      description: This endpoint is used to create a new request from CEX (Correos Express)
+      operationId: create-new-cex-request
+      parameters:
+        - name: Authorization
+          example: Bearer nfdasni412onpfasob
+          in: header
+          description: >-
+            This header loads information relevant to the type of user in order
+            to give them authority to execute the action requested in the
+            request.
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: ' Input body containing the information  to  create new Cex Request'
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudRecogidaCexDTO'
+        required: true
+      responses:
+        '200':
+          description: OK
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaCexDTO'
+        '201':
+          description: Created
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaCexDTO'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Request not found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '405':
+          description: Request validation exception
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error405'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+      x-codegen-request-body-name: solicitudRecogidaCexDTO
+  /requests/request-xl:
+    post:
+      summary: >-
+        Summary of the post method for the model path resource. Here we explain
+        what this resource does.
+      description: Designed process for the creation of requests of XL type of Pickups
+      operationId: request-xl
+      requestBody:
+        description: solicitudRecogidaDTOList
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        required: true
+      responses:
+        '200':
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        '400':
+          description: The server could not understand the request due to invalid
+            syntax.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '401':
+          description: Unauthorized, client_id or client_secret invalid or Authorization invalid.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error401'
+        '403':
+          description: Forbidden access to this resource
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error403'
+        '404':
+          description: Request not found
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error404'
+        '405':
+          description: Request validation exception
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error405'
+        '500':
+          description: The server has encountered an error but it doesn't know how
+            to handle.
+          headers:
+            content-type:
+              description: 'Header '
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error500'
+      x-codegen-request-body-name: solicitudRecogidaDTOList
+components:
+  schemas:
+    SolicitudRecogidaDTO:
+      title: SolicitudRecogidaDTO
+      type: object
+      properties:
+        codRequests:
+          type: string
+          description: "This\_string\_param\_represents\_the\_code\_of\_the\_requests\_of\_Correos"
+          example: SR0103202200001FL
+          maxLength: 17
+        area:
+          type: string
+          description: "This\_string\_param\_represents\_the\_rate\_zone\_code"
+          example: '04'
+        address:
+          type: string
+          description: This string param reprensets the road type code. This field is mandatory.
+          example: Mayor
+        addressObserv:
+          type: string
+          description: This string param representes the address observation
+          example: NO REALIZAR RECOGIDA
+        billable:
+          type: boolean
+          description: This boolean param specify if the address is billable
+          example: false
+        block:
+          type: string
+          description: "This\_string\_param\_representes\_the\_housing\_block"
+          example: '2'
+        cexCodRequest:
+          type: string
+          description: This string param represents the internal Cex id of the requests
+          example: SRPRUEBA
+        clientObservations:
+          type: string
+          description: This string param represents the client observations
+          example: 11h a 14.30h
+        codAddress:
+          type: integer
+          description: "This\_integer\_param\_representes\_the\_address\_code"
+          format: int32
+          example: 1
+        codAnnex:
+          type: string
+          description: "This\_string\_param\_represents\_the\_annex\_code.\_054\_(letters),\_091\_(packages). This field is mandatory"
+          example: '054'
+          enum:
+            - '054'
+            - '091'
+        codCitypaq:
+          type: string
+          description: This string param represent the Citypaq code
+          example: S1000396D
+        codClient:
+          type: integer
+          description: This integer param create a client for obtain a client code
+          format: int32
+          example: 1
+        codContract:
+          type: string
+          description: "This\_string\_param\_represents\_the\_contract\_code. This field is mandatory"
+          example: '08000591'
+        codired:
+          type: string
+          description: This string param represents the unit code
+          example: '0100004'
+        codOperativeZone:
+          type: string
+          description: >-
+            This string param represents the code of the operative zone. This
+            only use in the fixed requests
+          example: '04'
+        codRefEdocumento:
+          type: string
+          description: This string param represents the requestsEdoc reference code
+          example: 090007d18100655d
+        codReason:
+          type: string
+          description: "This string param represents the code reason. <table>
+        pudoId:
+          type: string
+          description: PUDO CodiRed
+          maxLength: 10
+          example: PUDOID001
+<tr><td>Q</td>	<td>Volumen / Peso a Recoger Excesivo</td>
+<tr><td>V</td>	<td>Recogido</td>
+<tr><td>Z</td>	<td>Recogidas en viaje adicional</td>
+<tr><td>Y</td>	<td>Hurto o robo</td>
+<tr><td>A</td>	<td>Faltan datos</td>
+<tr><td>F</td>	<td>Enfermedad del conductor</td>
+<tr><td>O</td>	<td>Sin tiempo por error de transmisión</td>
+<tr><td>AB</td>	<td>Tráfico</td>
+<tr><td>AF</td>	<td>Fiesta local</td>
+<tr><td>E</td>	<td>Avería</td>
+<tr><td>M</td>	<td>Sin tiempo para efectuar el servicio</td>
+<tr><td>N</td>	<td>Error asignación / mal encaminado</td>
+<tr><td>R</td>	<td>Climatología adversa</td>
+<tr><td>S</td>	<td>Área inaccesible / acceso restringido por horario</td>
+<tr><td>U</td>	<td>Dirección incorrecta / incompleta</td></tr>
+<tr><td>W</td>	<td>Huelga</td></tr>
+<tr><td>B</td>	<td>Cliente Ausente</td></tr>
+<tr><td>C</td>	<td>Cliente sin correo</td></tr>
+<tr><td>H</td>	<td>Punto de recogida alejado del habitual</td></tr>
+<tr><td>T</td>	<td>Tiempo de espera excesivo</td></tr>
+<tr><td>X</td>	<td>Reintento imputable a cliente</td></tr>
+<tr><td>K</td>	<td>Diferencia número envíos a recoger</td></tr>
+<tr><td>AC</td>	<td>Mercancia Peligrosa</td></tr>
+<tr><td>AD</td>	<td>Mercancía no cargada por falta de capacidad en el vehículo</td></tr>
+<tr><td>AE</td>	<td>Cita previa necesaria</td></tr>
+<tr><td>AG</td>	<td>Cerrado por vacaciones</td></tr>
+<tr><td>AH</td>	<td>Mercancía ya recogida</td></tr>
+<tr><td>D</td>	<td>Mal embalado</td></tr>
+<tr><td>G</td>	<td>Cliente no quiere servicio de recogida</td></tr>
+<tr><td>I</td>	<td>Falta Documentación</td></tr>
+<tr><td>J</td>	<td>Sin envios</td></tr>
+</table>"
+          example: A
+        codRoute:
+          type: string
+          description: This string param represents the route code of a requests
+          example: '5'
+        codSection:
+          type: string
+          description: This string param represents the section code of a requests
+          example: '0101'
+        codSpecificContract:
+          type: string
+          description: "This\_string\_param\_representes\_the\_specific\_contract\_code. This field is mandatory"
+          example: '80114555'
+        codUnlockCitypaq:
+          type: integer
+          description: This string param represents the citypaq unlock code
+          format: int32
+          example: 1
+        codVolumeCollected:
+          type: integer
+          description: "This\_integer\_param\_represents what kind of volumen collected\_"
+          format: int32
+          example: 1
+        contactEmail:
+          type: string
+          description: This string param represents the contact email
+          example: prueba@email.com
+        contactName:
+          type: string
+          description: This string param reperesents the contact name. This field is mandatory
+          example: Rafael
+        coordinate:
+          type: boolean
+          description: This boolean param specify if the requests can be arranged
+          example: false
+        cora:
+          type: boolean
+          description: This boolean param specify if cora is true or false
+          example: false
+        coste:
+          type: number
+          description: This number code represents the coste
+          example: 500
+        creationUserCode:
+          type: string
+          description: This string param represents the creation of the user code
+          example: P017662
+        creationDate:
+          type: string
+          description: >-
+            This string param representes the date on which the collection was
+            created
+          format: date
+          example: '2022-09-26'
+        deliveryManId:
+          type: string
+          description: >-
+            This string param represents the identifier of the delivery person
+            who makes the collection
+          example: P001225
+        door:
+          type: string
+          description: This string param represents the housing door
+          example: '1'
+        desIncidentReason:
+          type: string
+          description: This string param represents the incident reason description
+          example: Cliente sin Correo / no Preparado
+        desRoute:
+          type: string
+          description: This string param represents the route description
+          example: PC00
+        enviadoSap:
+          type: boolean
+          description: This boolean param specify if the request has been sent to SAP
+          example: true
+        error:
+          $ref: '#/components/schemas/ErrorDTO'
+        estimatedShipments:
+          type: integer
+          description: "This\_integer\_param\_represents\_the\_estimated\_shipments"
+          format: int32
+          example: 1
+        estimatedVolume:
+          type: integer
+          description: >-
+            This integer param represents the volume that is estimated to be in
+            the requests. 10 (envelopes), 20 (small), 30 (medium), 40 (big), 50 (very big), 60 (pallets), 70 (correos xl), 80 (palletized merchandise). This field is mandatory
+          format: int32
+          example: 10
+          enum:
+            - 10
+            - 20
+            - 30
+            - 40
+            - 50
+            - 60
+            - 70
+            - 80
+        favAddress:
+          type: boolean
+          description: This boolean param specify if the address is favourite
+          example: false
+        floor:
+          type: string
+          description: This string param represents the housing floor
+          example: '2'
+        group_id:
+          type: string
+          description: This string param represents an identifier group
+          example: '12'
+        isCbtAllowed:
+          type: boolean
+          description: >-
+            This boolean param specify if CBT allowed.If the result is true, it
+            means that the cbt can be read and therefore it is a collection of
+            Cex
+          example: false
+        isOnTheFly:
+          type: boolean
+          description: 'This boolean param specify if the collection is on the flight '
+          example: false
+        lastName2Contact:
+          type: string
+          description: This string param represents the second last name of the contact
+          example: Pérez
+        lastNameContact:
+          type: string
+          description: This string param represents the first last name of the contact
+          example: Pérez
+        liquidationObservations:
+          type: string
+          description: This string param represents the liquidation observations
+          example: Llamar al teléfono de contacto si no funciona el telefonillo
+        locality:
+          type: string
+          description: >-
+            This string param represents the locality where the collection has
+            to be made. This field is mandatory
+          example: Madrid
+        modalityType:
+          type: string
+          description: >-
+            This string param represents the type of the collection modality. It
+            can be standard or special. E (Special), S (Standard), F (Correos Frio), C (Citypaq), P(Pudo). This field is mandatory
+          example: E
+          enum:
+            - E
+            - S
+            - F
+            - C
+            - P
+        modificationUserCode:
+          type: string
+          description: This string param represents the modification user code. It is used for internal audit.
+          example: RODA
+        modificationDate:
+          type: string
+          description: This string param represents the modification date
+          format: date-time
+          example: '2022-09-28T13:27:09Z'
+        nombreCliente:
+          type: string
+          description: This string param represents the client name
+          example: Rafael
+        number:
+          type: string
+          description: "This\_param\_represents\_the\_house\_number"
+          example: '1'
+        numberEstimatedVolume:
+          type: integer
+          description: This integer param specify the estimated volume number
+          format: int32
+          example: 1
+        numberShipmentsCollected:
+          type: integer
+          description: This integer param represents the collected shipments number
+          format: int32
+          example: 1
+        numberVolumeCollected:
+          type: integer
+          description: This integer param represents the collected volume number
+          format: int32
+          example: 1
+        operationsObservations:
+          type: string
+          description: This string param represents the operations observations
+          example: Por la tarde
+        originSystem:
+          type: string
+          description: >-
+            This string param represents the system origin where the requests
+            was made. This field is mandatory
+          example: CEX
+        orderID:
+          type: string
+          description: This string param represents the order code
+          example: OR0202202200003FV
+        orderIDCorreos:
+          type: string
+          description: This string param represents the Correos order code
+          example: OR0912202100004FW
+        orderID_OV2:
+          type: string
+          description: This string param represents the OV2 order code
+          example: OR2022092649984EZ
+        orderAssignment:
+          type: integer
+          description: This integer param represents the assignment order
+          example: 1
+        packagesReadNumber:
+          type: integer
+          description: This integer param represents the number of packages read
+          format: int32
+          example: 1
+        perioricidad:
+          type: string
+          description: >-
+            This string param represents the number of daughters that are
+            generated in a week
+          example: '5'
+        phoneNumberContact:
+          type: string
+          description: This string param represents the contact phone number
+          example: '123456789'
+        portal:
+          type: string
+          description: This string param represents the house portal
+          example: '1'
+        postalCode:
+          type: string
+          description: >-
+            This string param represents the postal code of the locality where
+            the collection is made
+          example: '28038'
+        price:
+          type: integer
+          description: This string param represents the price
+          example: 10
+        printLabel:
+          type: boolean
+          description: This boolean param specify if you want print label
+          example: false
+        productType:
+          type: string
+          description: This string param represents the type of product
+          example: 'P'
+        province:
+          type: string
+          description: >-
+            This string param represents the province of the locality where the
+            collection is made. This field is mandatory. It is the first two numbers of postalCode.
+          example: '28'
+        requestDate:
+          type: string
+          description: >-
+            This string param represents the requests date where the requests
+            should be done. Must be equal to or later than the day of the petition. This field is mandatory
+          format: date
+          example: '2021-06-15'
+        requestDateSGIE:
+          type: string
+          description: This string param represents the request date SGIE
+          format: date
+          example: '2021-06-15'
+        roadType:
+          type: string
+          description: This string param reprensets the road type code
+          example: Calle
+        sapProduct:
+          type: integer
+          description: This integer param represents the product code Sap
+          example: 1
+        sentSGIE:
+          type: boolean
+          description: Specify if the request will be sent to Sgie
+          example: false
+        statusPrivate:
+          type: string
+          description: This string param represents the private status
+          example: ALTA_EN_UNIDAD
+        statusChangeDate:
+          type: string
+          description: This string param represents the status change date
+          format: date-time
+          example: '2022-09-28T13:27:09Z'
+        shift:
+          type: string
+          description: >-
+            This string param represents the shift turn. It can be morning (M)
+            or afternoon (T)
+          example: M
+          enum:
+            - M
+            - T
+        shipments:
+          type: array
+          description: This array param represents the shipments
+          items:
+            $ref: '#/components/schemas/EnvioDTO'
+        stair:
+          type: string
+          description: This string param represents the house stair
+          example: '1'
+        state:
+          type: string
+          description: "This string param represents the status code of a collection. <table> <tr><td>ASIGNADO_CODIRED</td> <tr><td>CURSADA</td> <tr><td>ALTA_EN_UNIDAD</td> <tr><td>PRE_ASIGNADA_MANUAL</td> <tr><td>EN_RUTA</td> <tr><td>PENDIENTE_EN_UNIDAD</td> <tr><td>REALIZADA</td> <tr><td>NO_REALIZADA</td> <tr><td>CANCELADA</td> <tr><td>INICIAL</td> <tr><td>VIABLE_CON_CAMBIOS</td> <tr><td>NO_VIABLE</td> <tr><td>ASIGNADA</td> <tr><td>EN_REPARTO</td> </table>"
+          example: ALTA_EN_UNIDAD
+        suburb:
+          type: string
+          description: This string param represents the neighborhood
+          example: 'Venecia'
+        time:
+          type: string
+          description: This string param represents the request time
+          example: H_12_00
+        timeSlot:
+          type: string
+          description: This string param represents the time slot. 1 -> 9:00 to 12:00, 2 -> 12:00 to 15:00, 3 -> 15:00 to 18:00, 4 -> 18:00 to 21:00.
+          example: '1'
+          enum:
+            - '1'
+            - '2'
+            - '3'
+            - '4'
+        type:
+          type: string
+          description: "This\_string\_param\_represents\_the\_type of a requets , can be sporadic (E) or fixed (F). This field is mandatory"
+          example: F
+          enum:
+            - F
+            - E
+        eid:
+          type: string
+          description: This string param is the identifier of a company user of CorreosIdS
+          example: '77383'
+        oid:
+          type: string
+          description: The string param is the identifier of a particular user of CorreosId
+          example: 92c8772e-c4c8-432c-8006-829394a76ece
+        unit:
+          type: string
+          description: >-
+            This string param represents the name of the unit to which a
+            collection belongs
+          example: MADRID CTA RECOGIDAS
+        ruralCenterCode:
+          type: string
+          description: This string param reprensets the rural center code ID
+          example: RU00001
+        stopOrder:
+          type: integer
+          description: Short number for stopOrder status
+          example: 00      
+        oldRequests:
+          type: array
+          description: >-
+            This array contains the codes of previous pickup requests associated
+            to the same shipment or CBTR, excluding the most recent one returned
+            in the response. Only populated when querying by shipment or CBTR
+            (GET /requests/shipment/{id}) and the shipment has been in more than
+            one request.
+          items:
+            type: string
+            example: SR2022092674323EA
+      description: Returns the fields of a normal request  
+    AltaSolicitudNeoDTO:
+      title: AltaSolicitudNeoDTO
+      type: object
+      properties:
+        address:
+          type: string
+          description: This string param reprensets the road type code
+          example: Mayor
+        addressObserv:
+          type: string
+          description: This string param representes the address observation
+          example: NO REALIZAR RECOGIDA
+        block:
+          type: string
+          description: "This\_string\_param\_representes\_the\_housing\_block"
+          example: '1'
+        clientObservations:
+          type: string
+          description: This string param representes the client observations
+          example: 11h a 14.30h
+        codAddress:
+          type: integer
+          description: "This\_integer\_param\_representes\_the\_address\_code"
+          format: int32
+          example: 12
+        codAnnex:
+          type: string
+          description: "This\_string\_param\_represents\_the\_annex\_code.\_054\_(letters),\_091\_(packages)"
+          example: '091'
+          enum:
+            - '054'
+            - '091'
+        codContract:
+          type: string
+          description: "This\_string\_param\_represents\_the\_contract\_code"
+          example: '54011205'
+        codSpecificContract:
+          type: string
+          description: This string param representes the specific contract code
+          example: '80114555'
+        contactEmail:
+          type: string
+          description: This string param representes the contact email
+          example: prueba@gmail.com
+        contactName:
+          type: string
+          description: This string param representes the contact name
+          example: Alvaro
+        coordinate:
+          type: boolean
+          description: This boolean param specify if the requests can be arranged
+          example: false
+        creationUserCode:
+          type: string
+          description: 'This string param represents the user code used in the creation  '
+          example: OV2
+        door:
+          type: string
+          description: This string param represents the housing door
+          example: A
+        estimatedShipments:
+          type: integer
+          description: This integer param represents the estimated shipments
+          format: int32
+          example: 1
+        estimatedVolume:
+          type: integer
+          description: >-
+            This integer param represents the volume that is estimated to be in
+            the requests. 10 (envelopes), 20 (small), 30 (medium), 40 (big), 50 (very big), 60 (pallets), 70 (correos xl), 80 (palletized merchandise).
+          format: int32
+          example: 10
+          enum:
+            - 10
+            - 20
+            - 30
+            - 40
+            - 50
+            - 60
+            - 70
+            - 80
+        favAddress:
+          type: boolean
+          description: This boolean param specify if the address is favourite
+          example: false
+        floor:
+          type: string
+          description: This string param represents the housing floor
+          example: '2'
+        lastName2Contact:
+          type: string
+          description: This string param represents the second last name of the contact
+          example: Pérez
+        lastNameContact:
+          type: string
+          description: This string param represents the first last name of the contact
+          example: Pérez
+        locality:
+          type: string
+          description: >-
+            This string param represents the locality where the collection has
+            to be made
+          example: Madrid
+        modalityType:
+          type: string
+          description: >-
+            This string param represents the type of the collection modality. It
+            can be standard or special. E (Special), S (Standard), F (Correos Frio), C (Citypaq), P(Pudo).
+          example: S
+          enum:
+            - E
+            - S
+            - F
+            - C
+            - P
+        number:
+          type: string
+          description: This string param represents the house number
+          example: '1'
+        numberEstimatedVolume:
+          type: integer
+          description: This integer param specify the estimated volume number
+          format: int32
+          example: 12
+        originSystem:
+          type: string
+          description: >-
+            This string param represents the system origin where the requests
+            was made
+          example: NEO
+        phoneNumberContact:
+          type: string
+          description: This string param represents the contact phone number
+          example: '678297339'
+        portal:
+          type: string
+          description: This string param represents the house portal
+          example: '1'
+        postalCode:
+          type: string
+          description: >-
+            This string param represents the postal code of the locality where
+            the collection is made
+          example: '28001'
+        price:
+          type: integer
+          description: This string param represents the price
+          example: 10
+        printLabel:
+          type: boolean
+          description: This boolean param specify if you want print label
+          example: false
+        province:
+          type: string
+          description: >-
+            This string param represents the province of the locality where the
+            collection is made
+          example: '28'
+        requestDate:
+          type: string
+          description: >-
+            This string param represents the requests date where the requests
+            should be done. Must be equal to or later than the day of the petition.
+          format: date
+          example: '2021-06-15'
+        roadType:
+          type: string
+          description: This string param reprensets the road type code
+          example: Cal
+        shift:
+          type: string
+          description: >-
+            This string param represents the shift turn. It can be morning (M)
+            or afternoon (T)
+          example: M
+          enum:
+            - M
+            - T
+        shipments:
+          type: array
+          description: This array param represents the shipments
+          items:
+            $ref: '#/components/schemas/EnvioDTO'
+        stair:
+          type: string
+          description: This string param represents the house stair
+          example: '1'
+        suburb:
+          type: string
+          description: This string param represents the neighborhood
+          example: 'Venecia'
+        timeSlot:
+          type: string
+          description: This string param represents the time slot. 1 -> 9:00 to 12:00, 2 -> 12:00 to 15:00, 3 -> 15:00 to 18:00, 4 -> 18:00 to 21:00.
+          example: '1'
+          enum:
+            - '1'
+            - '2'
+            - '3'
+            - '4'
+        type:
+          type: string
+          description: "This\_string\_param\_represents\_the\_type of a requets , can be sporadic (E) or fixed (F)"
+          example: F
+          enum:
+            - F
+            - E
+      description: Is the input object of requests created from NEO
+    ErrorDTO:
+      title: ErrorDTO
+      type: object
+      properties:
+        errorCode:
+          type: string
+          description: >-
+            This object show the error code and descripcion of the exception if
+            there is a error
+          example: '0'
+        errorDes:
+          type: string
+          description: This string param represents the result of the error
+          example: Solicitud creada con exito
+      description: Object with the description of error in CEX requests
+    CancelRequestDTO:
+      title: CancelRequestDTO
+      type: object
+      properties:
+        modificationUserCode:
+          type: string
+          description: Represents the api or the ISAM User that made the cancelation. It is used for internal audit.
+          example: E017078
+        rol:
+          type: string
+          description: This represents the role of Recogidas 2.0 that the user have
+          example: RECOGIDAS_US_PRE_ADMIN
+      description: Object with the nedeed to cancel a request
+    CierresDTO:
+      title: CierresDTO
+      type: object
+      properties:
+        closingEndDay:
+          type: string
+          description: This string param represents the deadline
+          example: '2022-11-01'
+        closingReason:
+          type: string
+          description: This string param returns the reason why the office has closed
+          example: maintenance
+        closingStartDay:
+          type: string
+          description: This string param represents the opening date
+          example: '2022-12-01'
+      description: It is the object with the information of a possible closure of an office
+    CodiredResponse:
+      title: CodiredResponse
+      type: object
+      properties:
+        codired:
+          type: string
+          description: This string param represents the unit code
+          example: '0100004'
+        unidad:
+          type: string
+          description: >-
+            This path param represents the name of the unit to which a
+            collection belongs
+          example: MADRID CTA RECOGIDAS
+      description: Codired fetch output based on a postal code
+    EnvioDTO:
+      title: EnvioDTO
+      type: object
+      properties:
+        codRequest:
+          type: string
+          description: "This\_string\_param\_represents\_the\_code\_of\_the\_requests\_of\_Correos"
+          example: SR2022092674323EA
+          maxLength: 17
+        codShipment:
+          type: integer
+          description: This integer param represents the shipment code
+          format: int32
+          example: 1
+        codShipmentCorreos:
+          type: string
+          description: This integer param represents the Correos shipment code
+          example: LH199678265AU
+        creationDate:
+          type: string
+          description: >-
+            This string param representes the date on which the collection was
+            created
+          format: date
+          example: '2022-09-28'
+        isDuplicatedShipment:
+          type: boolean
+          description: This boolean param specify if a shipment is duplicated
+          example: true
+        shipmentType:
+          type: string
+          description: This string param specify the shipment type. This field is mandatory if codShipmentCorreos is informed.
+          example: Albaran
+        clientReferenceCode:
+          type: string
+          description: >-
+            This string param represents the client reference code associated to
+            the shipment (e.g. Celeritas reference). Optional field, returned in
+            responses and accepted in creation and modification requests.
+          example: REF-CLIENTE-001
+        shipmentBarCode:
+          type: string
+          description: >-
+            This string param represents the temporary shipment bar code (CBTR)
+            associated to the shipment within the pickup request. Optional field,
+            maximum 23 characters.
+          example: REC20230101000123
+          maxLength: 23
+      description: Object with the information of a shipment
+    EntradaEnvioDTO:
+      title: EntradaEnvioDTO
+      type: object
+      properties:
+        codShipmentCorreos:
+          type: string
+          description: This integer param represents the Correos shipment code
+          example: LH199678265AU
+        shipmentType:
+          type: string
+          description: This string param specify the shipment type
+          example: Albaran
+      description: Object with the information of a shipment
+    OfficesDTO:
+      title: OfficesDTO
+      type: object
+      properties:
+        closing:
+          type: array
+          description: This string param returns the reason why the office has closed
+          items:
+            $ref: '#/components/schemas/CierresDTO'
+        typeCode:
+          type: string
+          description: This string param represets the type Code
+          example: RU
+        unitCode:
+          type: string
+          description: This string param represents the unit code
+          example: '2825296'
+        unitName:
+          type: string
+          description: This string param represents the unit name
+          example: MADRID USE 7
+      description: Object with information related to an office
+    PageDTO:
+      title: PageDTO
+      type: object
+      properties:
+        number:
+          type: integer
+          description: This integer param represents the number of packages
+          format: int32
+          example: 0
+        size:
+          type: integer
+          description: This string param represents the size of package
+          format: int32
+          example: 10
+        totalElements:
+          type: integer
+          description: This string param represents the total number of elements
+          format: int32
+          example: 368099
+      description: >-
+        It is the object that returns the information of the page of the query
+        in which the front page is
+    RazonesDTO:
+      title: RazonesDTO
+      type: object
+      properties:
+        codReason:
+          type: string
+          description: "This string param represents the code reason. <table>
+<tr><td>Q</td>	<td>Volumen / Peso a Recoger Excesivo</td>
+<tr><td>V</td>	<td>Recogido</td>
+<tr><td>Z</td>	<td>Recogidas en viaje adicional</td>
+<tr><td>Y</td>	<td>Hurto o robo</td>
+<tr><td>A</td>	<td>Faltan datos</td>
+<tr><td>F</td>	<td>Enfermedad del conductor</td>
+<tr><td>O</td>	<td>Sin tiempo por error de transmisión</td>
+<tr><td>AB</td>	<td>Tráfico</td>
+<tr><td>AF</td>	<td>Fiesta local</td>
+<tr><td>E</td>	<td>Avería</td>
+<tr><td>M</td>	<td>Sin tiempo para efectuar el servicio</td>
+<tr><td>N</td>	<td>Error asignación / mal encaminado</td>
+<tr><td>R</td>	<td>Climatología adversa</td>
+<tr><td>S</td>	<td>Área inaccesible / acceso restringido por horario</td>
+<tr><td>U</td>	<td>Dirección incorrecta / incompleta</td></tr>
+<tr><td>W</td>	<td>Huelga</td></tr>
+<tr><td>B</td>	<td>Cliente Ausente</td></tr>
+<tr><td>C</td>	<td>Cliente sin correo</td></tr>
+<tr><td>H</td>	<td>Punto de recogida alejado del habitual</td></tr>
+<tr><td>T</td>	<td>Tiempo de espera excesivo</td></tr>
+<tr><td>X</td>	<td>Reintento imputable a cliente</td></tr>
+<tr><td>K</td>	<td>Diferencia número envíos a recoger</td></tr>
+<tr><td>AC</td>	<td>Mercancia Peligrosa</td></tr>
+<tr><td>AD</td>	<td>Mercancía no cargada por falta de capacidad en el vehículo</td></tr>
+<tr><td>AE</td>	<td>Cita previa necesaria</td></tr>
+<tr><td>AG</td>	<td>Cerrado por vacaciones</td></tr>
+<tr><td>AH</td>	<td>Mercancía ya recogida</td></tr>
+<tr><td>D</td>	<td>Mal embalado</td></tr>
+<tr><td>G</td>	<td>Cliente no quiere servicio de recogida</td></tr>
+<tr><td>I</td>	<td>Falta Documentación</td></tr>
+<tr><td>J</td>	<td>Sin envios</td></tr>
+</table>"
+          example: A
+        desReason:
+          type: string
+          description: "This string param describes the reason of a incident. <table>
+<tr><td>Volumen / Peso a Recoger Excesivo</td>
+<tr><td>Recogido</td>
+<tr><td>Recogidas en viaje adicional</td>
+<tr><td>Hurto o robo</td>
+<tr><td>Faltan datos</td>
+<tr><td>Enfermedad del conductor</td>
+<tr><td>Sin tiempo por error de transmisión</td>
+<tr><td>Tráfico</td>
+<tr><td>Fiesta local</td>
+<tr><td>Avería</td>
+<tr><td>Sin tiempo para efectuar el servicio</td>
+<tr><td>Error asignación / mal encaminado</td>
+<tr><td>Climatología adversa</td>
+<tr><td>Área inaccesible / acceso restringido por horario</td>
+<tr><td>Dirección incorrecta / incompleta</td></tr>
+<tr><td>Huelga</td></tr>
+<tr><td>Cliente Ausente</td></tr>
+<tr><td>Cliente sin correo</td></tr>
+<tr><td>Punto de recogida alejado del habitual</td></tr>
+<tr><td>Tiempo de espera excesivo</td></tr>
+<tr><td>Reintento imputable a cliente</td></tr>
+<tr><td>Diferencia número envíos a recoger</td></tr>
+<tr><td>Mercancia Peligrosa</td></tr>
+<tr><td>Mercancía no cargada por falta de capacidad en el vehículo</td></tr>
+<tr><td>Cita previa necesaria</td></tr>
+<tr><td>Cerrado por vacaciones</td></tr>
+<tr><td>Mercancía ya recogida</td></tr>
+<tr><td>Mal embalado</td></tr>
+<tr><td>Cliente no quiere servicio de recogida</td></tr>
+<tr><td>Falta Documentación</td></tr>
+<tr><td>Sin envios</td></tr>
+</table>"
+          example: Cliente Ausente
+      description: Object with information on each possible incidence of a requests
+    SolicitudRecogidaConfigDTO:
+      title: SolicitudRecogidaConfigDTO
+      type: object
+      properties:
+        codSrConfig:
+          type: integer
+          description: This integer param represents the configuration SR code
+          format: int32
+          example: 13
+        fechaParam:
+          type: string
+          description: This string param represents the date param
+          format: date
+          example: '2023-12-27'
+        parameter:
+          type: string
+          description: >-
+            This string param represents the information of certain constant
+            environment variables
+          example: '8'
+      description: Object with the information of configuration variables
+    SolicitudRecogidaCexDTO:
+      title: SolicitudRecogidaCexDTO
+      type: object
+      properties:
+        coordinate:
+          type: boolean
+          description: This boolean param specify if the requests can be arranged
+          example: false
+        address:
+          type: string
+          description: This string param reprensets the road type code
+          example: Mayor
+        isCbtAllowed:
+          type: boolean
+          description: >-
+            This boolean param specify if CBT allowed.If the result is true, it
+            means that the cbt can be read and therefore it is a collection of
+            Cex
+          example: false
+        cexCodRequest:
+          type: string
+          description: This string param represents the internal Cex id of the requests
+          example: SRPRUEBA
+        clientObservations:
+          type: string
+          description: This string param represents the client observations
+          example: 11h a 14.30h
+        codAnnex:
+          type: string
+          description: "This\_string\_param\_represents\_the\_annex\_code.\_054\_(letters),\_091\_(packages)"
+          example: '054'
+          enum:
+            - '054'
+            - '091'
+        price:
+          type: integer
+          description: This string param represents the price
+          example: 10
+        codClient:
+          type: integer
+          description: This integer param create a client for obtain a client code
+          format: int32
+          example: 1
+        codContract:
+          type: string
+          description: "This\_string\_param\_represents\_the\_contract\_code"
+          example: '08000591'
+        codSpecificContract:
+          type: string
+          description: "SThis\_string\_param\_representes\_the\_specific\_contract\_code"
+          example: '80114555'
+        contactEmail:
+          type: string
+          description: This string param represents the contact email
+          example: prueba@gmail.com
+        contactName:
+          type: string
+          description: This string param reperesents the contact name
+          example: Rafael
+        endTime:
+          type: string
+          description: This string param represents the end time
+          example: '13:00'
+        estimatedShipments:
+          type: integer
+          description: This integer param represents the estimated shipments
+          format: int32
+          example: 1
+        estimatedVolume:
+          type: integer
+          description: >-
+            This integer param represents the volume that is estimated to be in
+            the requests. 10 (envelopes), 20 (small), 30 (medium), 40 (big), 50 (very big), 60 (pallets), 70 (correos xl), 80 (palletized merchandise).
+          format: int32
+          example: 10
+          enum:
+            - 10
+            - 20
+            - 30
+            - 40
+            - 50
+            - 60
+        lastName2Contact:
+          type: string
+          description: This string param represents the second last name of the contact
+          example: Pérez
+        lastNameContact:
+          type: string
+          description: This string param represents the first last name of the contact
+          example: Pérez
+        locality:
+          type: string
+          description: >-
+            This string param represents the locality where the collection has
+            to be made
+          example: Madrid
+        modalityType:
+          type: string
+          description: >-
+            This string param represents the type of the collection modality. It
+            can be standard or special. E (Special), S (Standard), F (Correos Frio), C (Citypaq), P(Pudo).
+          example: E
+          enum:
+            - E
+            - S
+            - F
+            - C
+            - P
+        number:
+          type: string
+          description: This integer param represents the house number
+          example: '1'
+        numberEstimatedVolume:
+          type: integer
+          description: This integer param specify the estimated volume number
+          format: int32
+          example: 1
+        originSystem:
+          type: string
+          description: >-
+            This string param represents the system origin where the requests
+            was made
+          example: CEX
+        phoneNumberContact:
+          type: string
+          description: This string param represents the contact phone number
+          example: '123456789'
+        postalCode:
+          type: string
+          description: >-
+            This string param represents the postal code of the locality where
+            the collection is made
+          example: '28038'
+        province:
+          type: string
+          description: >-
+            This string param represents the province of the locality where the
+            collection is made
+          example: '28'
+        requestDate:
+          type: string
+          description: >-
+            This string param represents the requests date where the requests
+            should be done. Must be equal to or later than the day of the petition.
+          format: date
+          example: '2021-06-15'
+        roadType:
+          type: string
+          description: This string param reprensets the road type code
+          example: Calle
+        shift:
+          type: string
+          description: >-
+            This string param represents the shift turn. It can be morning (M)
+            or afternoon (T)
+          example: M
+          enum:
+            - M
+            - T
+        startTime:
+          type: string
+          description: This string param represents the start time
+          example: '12:00'
+        timeSlot:
+          type: string
+          description: This string param represents the time slot. 1 -> 9:00 to 12:00, 2 -> 12:00 to 15:00, 3 -> 15:00 to 18:00, 4 -> 18:00 to 21:00.
+          example: '1'
+          enum:
+            - '1'
+            - '2'
+            - '3'
+            - '4'
+        modificationUserCode:
+          type: string
+          description: This string param represents the modification user code. It is used for internal audit.
+          example: RODA
+        type:
+          type: string
+          description: >-
+            This string param represents the request type. It can be fixed (F) or
+            sporadic (E)
+          example: E
+          enum:
+            - F
+            - E
+      description: Returns the fields of a CEX request
+    SolicitudRecogidaModifyDTO:
+      title: SolicitudRecogidaModifyDTO
+      type: object
+      properties:
+        addressObserv:
+          type: string
+          description: This string param representes the address observation
+          example: NO REALIZAR RECOGIDA
+        clientObservations:
+          type: string
+          description: This string param represents the client observations
+          example: 11h a 14.30h
+        codCorreosRequest:
+          type: string
+          description: >-
+            This string param represents the identifier of the collection
+            request
+          example: SR0103202200001FL
+        codEvent:
+          type: string
+          description: This string param represent the event code received from SGIE / TMS
+          example: '7'
+        codReason:
+          type: string
+          description: "This string param represents the code reason. <table>
+<tr><td>Q</td>	<td>Volumen / Peso a Recoger Excesivo</td>
+<tr><td>V</td>	<td>Recogido</td>
+<tr><td>Z</td>	<td>Recogidas en viaje adicional</td>
+<tr><td>Y</td>	<td>Hurto o robo</td>
+<tr><td>A</td>	<td>Faltan datos</td>
+<tr><td>F</td>	<td>Enfermedad del conductor</td>
+<tr><td>O</td>	<td>Sin tiempo por error de transmisión</td>
+<tr><td>AB</td>	<td>Tráfico</td>
+<tr><td>AF</td>	<td>Fiesta local</td>
+<tr><td>E</td>	<td>Avería</td>
+<tr><td>M</td>	<td>Sin tiempo para efectuar el servicio</td>
+<tr><td>N</td>	<td>Error asignación / mal encaminado</td>
+<tr><td>R</td>	<td>Climatología adversa</td>
+<tr><td>S</td>	<td>Área inaccesible / acceso restringido por horario</td>
+<tr><td>U</td>	<td>Dirección incorrecta / incompleta</td></tr>
+<tr><td>W</td>	<td>Huelga</td></tr>
+<tr><td>B</td>	<td>Cliente Ausente</td></tr>
+<tr><td>C</td>	<td>Cliente sin correo</td></tr>
+<tr><td>H</td>	<td>Punto de recogida alejado del habitual</td></tr>
+<tr><td>T</td>	<td>Tiempo de espera excesivo</td></tr>
+<tr><td>X</td>	<td>Reintento imputable a cliente</td></tr>
+<tr><td>K</td>	<td>Diferencia número envíos a recoger</td></tr>
+<tr><td>AC</td>	<td>Mercancia Peligrosa</td></tr>
+<tr><td>AD</td>	<td>Mercancía no cargada por falta de capacidad en el vehículo</td></tr>
+<tr><td>AE</td>	<td>Cita previa necesaria</td></tr>
+<tr><td>AG</td>	<td>Cerrado por vacaciones</td></tr>
+<tr><td>AH</td>	<td>Mercancía ya recogida</td></tr>
+<tr><td>D</td>	<td>Mal embalado</td></tr>
+<tr><td>G</td>	<td>Cliente no quiere servicio de recogida</td></tr>
+<tr><td>I</td>	<td>Falta Documentación</td></tr>
+<tr><td>J</td>	<td>Sin envios</td></tr>
+</table>"
+          example: A
+        codRoute:
+          type: string
+          description: This string param represents the route code of a requests
+          example: '5'
+        codSection:
+          type: string
+          description: This string param represents the section code of a requests
+          example: '0101'
+        codired:
+          type: string
+          description: This string param represents the unit code
+          example: '0100004'
+        contactEmail:
+          type: string
+          description: This string param represents the contact email
+          example: prueba@gmail.com
+        contactName:
+          type: string
+          description: This string param reperesents the contact name
+          example: Rafael
+        coste:
+          type: number
+          description: This number code represents the coste
+          example: 500
+        deliveryManId:
+          type: string
+          description: >-
+            This string param represents the identifier of the delivery person
+            who makes the collection
+          example: P001225
+        desRoute:
+          type: string
+          description: This string param represents the route description
+          example: PC00
+        desReason:
+          type: string
+          description: "This string param representes the reason for the incidence. <table>
+<tr><td>Volumen / Peso a Recoger Excesivo</td>
+<tr><td>Recogido</td>
+<tr><td>Recogidas en viaje adicional</td>
+<tr><td>Hurto o robo</td>
+<tr><td>Faltan datos</td>
+<tr><td>Enfermedad del conductor</td>
+<tr><td>Sin tiempo por error de transmisión</td>
+<tr><td>Tráfico</td>
+<tr><td>Fiesta local</td>
+<tr><td>Avería</td>
+<tr><td>Sin tiempo para efectuar el servicio</td>
+<tr><td>Error asignación / mal encaminado</td>
+<tr><td>Climatología adversa</td>
+<tr><td>Área inaccesible / acceso restringido por horario</td>
+<tr><td>Dirección incorrecta / incompleta</td></tr>
+<tr><td>Huelga</td></tr>
+<tr><td>Cliente Ausente</td></tr>
+<tr><td>Cliente sin correo</td></tr>
+<tr><td>Punto de recogida alejado del habitual</td></tr>
+<tr><td>Tiempo de espera excesivo</td></tr>
+<tr><td>Reintento imputable a cliente</td></tr>
+<tr><td>Diferencia número envíos a recoger</td></tr>
+<tr><td>Mercancia Peligrosa</td></tr>
+<tr><td>Mercancía no cargada por falta de capacidad en el vehículo</td></tr>
+<tr><td>Cita previa necesaria</td></tr>
+<tr><td>Cerrado por vacaciones</td></tr>
+<tr><td>Mercancía ya recogida</td></tr>
+<tr><td>Mal embalado</td></tr>
+<tr><td>Cliente no quiere servicio de recogida</td></tr>
+<tr><td>Falta Documentación</td></tr>
+<tr><td>Sin envios</td></tr>
+</table>"
+          example: Cliente Ausente
+        group_id:
+          type: string
+          description: This string param represents an identifier group
+          example: '12'
+        lastName2Contact:
+          type: string
+          description: This string param represents the second last name of the contact
+          example: Pérez
+        lastNameContact:
+          type: string
+          description: This string param represents the first last name of the contact
+          example: Pérez
+        liquidationObservations:
+          type: string
+          description: This string param represents the liquidation observations
+          example: Llamar al teléfono de contacto si no funciona el telefonillo
+        modificationUserCode:
+          type: string
+          description: This string param represents the modification user code. It is used for internal audit.
+          example: RODA
+        orderAssignment:
+          type: integer
+          description: This integer param represents the assignment order
+          example: 1
+        phoneNumberContact:
+          type: string
+          description: This string param represents the contact phone number
+          example: '123456789'
+        price:
+          type: integer
+          description: This string param represents the price
+          example: 10
+        requestDate:
+          type: string
+          description: >-
+            This string param represents the requests date where the requests
+            should be done. Must be equal to or later than the day of the petition.
+          format: date
+          example: '2021-06-15'
+        requestDateSGIE:
+          type: string
+          description: This string param represents the request date SGIE
+          format: date
+          example: '2021-06-15'
+        rol:
+          type: string
+          description: >-
+            This string param represents the role of the user used in the
+            petition 
+          example: RECOGIDAS_PRE_AD_ADMIN
+        shipments:
+          type: array
+          description: This array param represents the shipments
+          items:
+            $ref: '#/components/schemas/EnvioDTO'
+        eventDate:
+          type: string
+          description: Field used to compare the collection status change date (Available for HADES flow)
+          format: date-time
+          example: '2024-02-15T17:27:09Z'
+        ruralCenterCode:
+          type: string
+          description: This string param reprensets the rural center code ID
+          example: RU00001
+        stopOrder:
+          type: integer
+          description: Short number for stopOrder status
+          example: 00              
+      description: This is the schema modify the requests
+    SolicitudRecogidaPDADTO:
+      title: SolicitudRecogidaPDADTO
+      type: object
+      properties:
+        codCorreosRequest:
+          type: string
+          description: >-
+            This string param represents the identifier of the collection
+            request
+          example: SR0103202200001FL
+        codVolumeCollected:
+          type: integer
+          description: "This integer\_param\_represents what kind of volumen collected\_"
+          format: int32
+          example: 2
+        numberShipmentsCollected:
+          type: integer
+          description: This integer param represents the collected shipments number
+          format: int32
+          example: 1
+        numberVolumeCollected:
+          type: integer
+          description: This integer param represents the collected volume number
+          format: int32
+          example: 1
+        packagesReadNumber:
+          type: integer
+          description: This integer param represents the number of packages read
+          format: int32
+          example: 10
+        shipments:
+          type: array
+          nullable: true
+          description: This array param represents the shipments
+          items:
+            $ref: '#/components/schemas/EnvioDTO'
+      description: Is the input object of the update method that is done from the PDAs
+    SolicitudRecogidaResponse:
+      title: SolicitudRecogidaResponse
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/SolicitudRecogidaDTO'
+        page:
+          $ref: '#/components/schemas/PageDTO'
+      description: Output object of the SRs query method
+    SolicitudRecogidaUpdatedDTO:
+      title: SolicitudRecogidaUpdatedDTO
+      type: object
+      properties:
+        modificationUserCode:
+          type: string
+          description: This string param allows user code modification. It is used for internal audit.
+          example: RODA
+        rol:
+          type: string
+          description: >-
+            This string param represents the role of the user used in the
+            petition 
+          example: RECOGIDAS_PRE_AD_ADMIN
+      description: Is the input object of the update methods
+    SolicitudRecogidaViabilidadDTO:
+      title: SolicitudRecogidaViabilidadDTO
+      type: object
+      properties:
+        codired:
+          type: string
+          description: This string param represents the unit code
+          example: '2823296'
+        contactEmail:
+          type: string
+          description: This string param represents the contact email
+          example: prueba@gmail.com
+        contactName:
+          type: string
+          description: This string param reperesents the contact name
+          example: Pablo
+        coste:
+          type: number
+          description: "This\_number\_code\_represents\_the\_coste"
+          example: 500
+        lastName2Contact:
+          type: string
+          description: This string param represents the second last name of the contact
+          example: Pérez
+        lastNameContact:
+          type: string
+          description: This string param represents the first last name of the contact
+          example: Pérez
+        modificationUserCode:
+          type: string
+          description: This string param represents the modification user code. It is used for internal audit.
+          example: RODA
+        operationsObservations:
+          type: string
+          description: This string param represents the operations observation
+          example: Por la tarde
+        phoneNumberContact:
+          type: string
+          description: This string param represents the contact phone number
+          example: '123456789'
+        requestDate:
+          type: string
+          description: >-
+            This string param represents the requests date where the requests
+            should be done. Must be equal to or later than the day of the petition.
+          format: date
+          example: '2022-12-01'
+        rol:
+          type: string
+          description: >-
+            This string param represents the role of the user used in the
+            petition
+          example: RECOGIDAS_PRE_AD_ADMIN
+        shift:
+          type: string
+          description: >-
+            This string param represents the shift turn. It can be morning (M)
+            or afternoon (T)
+          example: M
+          enum:
+            - M
+            - T
+        state:
+          type: string
+          description: "This string param represents the status code of a collection. <table> <tr><td>ASIGNADO_CODIRED</td> <tr><td>CURSADA</td> <tr><td>ALTA_EN_UNIDAD</td> <tr><td>PRE_ASIGNADA_MANUAL</td> <tr><td>EN_RUTA</td> <tr><td>PENDIENTE_EN_UNIDAD</td> <tr><td>REALIZADA</td> <tr><td>NO_REALIZADA</td> <tr><td>CANCELADA</td> <tr><td>INICIAL</td> <tr><td>VIABLE_CON_CAMBIOS</td> <tr><td>NO_VIABLE</td> <tr><td>ASIGNADA</td> <tr><td>EN_REPARTO</td> </table>"
+          example: CURSADA
+        timeSlot:
+          type: string
+          description: This string param represents the time slot. 1 -> 9:00 to 12:00, 2 -> 12:00 to 15:00, 3 -> 15:00 to 18:00, 4 -> 18:00 to 21:00.
+          example: '1'
+          enum:
+            - '1'
+            - '2'
+            - '3'
+            - '4'
+      description: Is the input object to accept feasibility of a request
+    error400:
+      type: object
+      description: Error 400
+      example:
+        code: '400'
+        message: Invalid Request
+        moreInformation:
+          description: The request was bad
+          link: www.correos.es
+    error401:
+      type: object
+      description: Error 401
+      example:
+        code: '401'
+        message: Bad request
+        moreInformation:
+          description: The request was bad
+          link: www.correos.es
+    error402:
+      type: object
+      description: Error 402
+      example:
+        code: '402'
+        message: Bad request
+        moreInformation:
+          description: The request was bad
+          link: www.correos.es
+    error403:
+      type: object
+      description: Error 403
+      example:
+        code: '403'
+        message: Unauthorized
+        moreInformation:
+          description: The request was bad
+          link: www.correos.es
+    error404:
+      type: object
+      description: Error 400
+      example:
+        code: '404'
+        message: Invalid Request
+        moreInformation:
+          description: The request was bad
+          link: www.correos.es
+    error405:
+      type: object
+      description: Error 405
+      example:
+        code: '405'
+        message: Validation exception
+        moreInformation:
+          description: The request was bad
+          link: www.correos.es
+    error409:
+      type: object
+      description: Error 409
+      example:
+        code: '409'
+        message: Conflict
+        moreInformation:
+          description: The request was bad
+          link: www.correos.es
+    error200Vacio:
+      type: object
+      description: 200 OK vacio
+      example:
+        code: '200'
+    error500:
+      type: object
+      description: Error 500
+      example:
+        code: '500'
+        message: Internal Server Error
+        moreInformation:
+          description: The request was bad
+          link: www.correos.es
+    fechaHora:
+      type: object
+      properties:
+        fecha:
+          type: string
+          example: '2023-05-05 12:16:57.425'
+      required:
+        - fecha
+    getFirstDayRequestDate:
+      type: string
+      description: 'This string param representes to get the first day of request date  '
+      example: '3'
+    getMaxDays:
+      type: string
+      description: 'This string param representes the maximum number of days'
+      example: '1'
+    getMaxShipmentsBatch:
+      type: string
+      description: >-
+        This string param representes the maximun number of pending shipments to
+        process in the shipment batch  
+      example: '4'
+    CheckPickupDayModalityDTO:
+      title: CheckPickupDayModalityDTO
+      type: object
+      properties:
+        codResponse:
+          type: string
+          description: This string represents the code of the response
+          example: 'OK'
+        descResponse:
+          type: string
+          description: This string represents the description of the response
+          example: Petición válida
+  securitySchemes:
+    apiKeyHeader:
+      type: apiKey
+      name: Ocp-Apim-Subscription-Key
+      in: header
+    apiKeyQuery:
+      type: apiKey
+      name: subscription-key
+      in: query
