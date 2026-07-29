@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     EMAIL_ENABLED: bool = False
     SITE_URL: str = "http://localhost:4200"
 
+    # Resend API key — when set, all emails are sent via Resend instead of SMTP.
+    # Required in production (Vercel/AWS blocks SMTP from hosting providers).
+    # Get your key at resend.com → API Keys. Domain must be verified in Resend dashboard.
+    RESEND_API_KEY: str = ""
+
     # Pedidos@cremacuadrado.com — sin credenciales propias todavía, cae en Info@ (ver app/services/email.py)
     SMTP_PEDIDOS_HOST: str = "smtp.titan.email"
     SMTP_PEDIDOS_PORT: int = 587

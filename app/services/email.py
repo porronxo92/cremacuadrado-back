@@ -85,6 +85,33 @@ def _send(to_email: str, subject: str, html: str, text: str = "", mailbox: Mailb
         logger.info("Email suppressed (EMAIL_ENABLED=False) mailbox=%s to=%s subject=%r", mailbox, to_email, subject)
         return True
 
+    # ------------------------------------------------------------------
+    # Resend path (production) — used when RESEND_API_KEY is set.
+    # Resend works from any cloud provider; SMTP from Hostinger is blocked
+    # by AWS/Vercel IP ranges.
+    # ------------------------------------------------------------------
+    if settings.RESEND_API_KEY:
+        try:
+            import resend as _resend
+            _resend.api_key = settings.RESEND_API_KEY
+            params: dict = {
+                "from": box.sender,
+                "to": [to_email],
+                "subject": subject,
+                "html": html,
+            }
+            if text:
+                params["text"] = text
+            _resend.Emails.send(params)
+            logger.info("Email sent via Resend mailbox=%s to=%s subject=%r", mailbox, to_email, subject)
+            return True
+        except Exception:
+            logger.error("Email failed via Resend mailbox=%s to=%s subject=%r", mailbox, to_email, subject, exc_info=True)
+            return False
+
+    # ------------------------------------------------------------------
+    # SMTP path (local development)
+    # ------------------------------------------------------------------
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
@@ -100,10 +127,10 @@ def _send(to_email: str, subject: str, html: str, text: str = "", mailbox: Mailb
             server.login(box.user, box.password)
             server.sendmail(box.from_email, [to_email], msg.as_string())
 
-        logger.info("Email sent mailbox=%s to=%s subject=%r", mailbox, to_email, subject)
+        logger.info("Email sent via SMTP mailbox=%s to=%s subject=%r", mailbox, to_email, subject)
         return True
     except Exception:
-        logger.error("Email failed mailbox=%s to=%s subject=%r", mailbox, to_email, subject, exc_info=True)
+        logger.error("Email failed via SMTP mailbox=%s to=%s subject=%r", mailbox, to_email, subject, exc_info=True)
         return False
 
 
@@ -125,6 +152,38 @@ def _send_with_attachment(
         )
         return True
 
+    # ------------------------------------------------------------------
+    # Resend path (production)
+    # ------------------------------------------------------------------
+    if settings.RESEND_API_KEY:
+        try:
+            import base64 as _b64
+            import resend as _resend
+            _resend.api_key = settings.RESEND_API_KEY
+            params: dict = {
+                "from": box.sender,
+                "to": [to_email],
+                "subject": subject,
+                "html": html,
+                "attachments": [
+                    {
+                        "filename": attachment_filename,
+                        "content": _b64.b64encode(attachment_bytes).decode(),
+                    }
+                ],
+            }
+            if text:
+                params["text"] = text
+            _resend.Emails.send(params)
+            logger.info("Email with attachment sent via Resend mailbox=%s to=%s subject=%r", mailbox, to_email, subject)
+            return True
+        except Exception:
+            logger.error("Email with attachment failed via Resend mailbox=%s to=%s subject=%r", mailbox, to_email, subject, exc_info=True)
+            return False
+
+    # ------------------------------------------------------------------
+    # SMTP path (local development)
+    # ------------------------------------------------------------------
     try:
         msg = MIMEMultipart("mixed")
         msg["Subject"] = subject
@@ -147,10 +206,10 @@ def _send_with_attachment(
             server.login(box.user, box.password)
             server.sendmail(box.from_email, [to_email], msg.as_string())
 
-        logger.info("Email with attachment sent mailbox=%s to=%s subject=%r", mailbox, to_email, subject)
+        logger.info("Email with attachment sent via SMTP mailbox=%s to=%s subject=%r", mailbox, to_email, subject)
         return True
     except Exception:
-        logger.error("Email with attachment failed mailbox=%s to=%s subject=%r", mailbox, to_email, subject, exc_info=True)
+        logger.error("Email with attachment failed via SMTP mailbox=%s to=%s subject=%r", mailbox, to_email, subject, exc_info=True)
         return False
 
 
