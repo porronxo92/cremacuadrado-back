@@ -349,6 +349,7 @@ async def complete_checkout(
 
     # Verify payment status directly with Stripe — never trust frontend claims
     try:
+        stripe_lib.api_key = settings.STRIPE_SECRET_KEY
         stripe_pi = stripe_lib.PaymentIntent.retrieve(complete_data.payment_intent_id)
     except stripe_lib.StripeError as e:
         logger.error(
@@ -451,6 +452,7 @@ async def get_order_confirmation(
     # This covers: (a) local dev without Stripe CLI, (b) delayed webhook delivery.
     if order.status == "pending_payment" and order.payment_intent_id:
         try:
+            stripe_lib.api_key = settings.STRIPE_SECRET_KEY
             stripe_pi = stripe_lib.PaymentIntent.retrieve(order.payment_intent_id)
             if stripe_pi.status == "succeeded":
                 logger.info(
