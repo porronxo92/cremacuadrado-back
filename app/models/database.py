@@ -12,6 +12,8 @@ engine = create_engine(
     pool_pre_ping=True,
     pool_size=5,
     max_overflow=10,
+    pool_timeout=10,          # max seconds waiting for a connection from the pool
+    connect_args={"connect_timeout": 5},   # fail fast if DB is unreachable
 )
 
 # Create session factory

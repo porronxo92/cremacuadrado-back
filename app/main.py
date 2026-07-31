@@ -186,9 +186,17 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
             "client_ip": request.client.host if request.client else "-",
         },
     )
+    origin = request.headers.get("origin", "")
+    cors_headers = {}
+    if origin in settings.CORS_ORIGINS:
+        cors_headers = {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+        }
     return JSONResponse(
         status_code=500,
         content={"detail": "Error interno del servidor"},
+        headers=cors_headers,
     )
 
 
