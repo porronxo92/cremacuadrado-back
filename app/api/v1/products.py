@@ -188,6 +188,37 @@ def get_product(slug: str, db: DbSession):
     )
 
 
+@router.get("/reviews/featured", response_model=List[dict])
+def list_featured_reviews(
+    db: DbSession,
+    min_rating: int = Query(4, ge=1, le=5),
+    limit: int = Query(4, ge=1, le=20),
+):
+    """Get top-rated approved reviews across all products, for homepage display."""
+    reviews = db.query(Review).options(
+        joinedload(Review.user),
+        joinedload(Review.product),
+    ).filter(
+        Review.status == "approved",
+        Review.rating >= min_rating,
+    ).order_by(Review.rating.desc(), Review.created_at.desc()).limit(limit).all()
+
+    return [
+        {
+            "id": r.id,
+            "rating": r.rating,
+            "title": r.title,
+            "comment": r.comment,
+            "user_name": r.user.first_name if r.user else "Anónimo",
+            "product_name": r.product.name if r.product else "",
+            "product_slug": r.product.slug if r.product else "",
+            "is_verified_purchase": r.is_verified_purchase,
+            "created_at": r.created_at,
+        }
+        for r in reviews
+    ]
+
+
 @router.get("/{slug}/reviews", response_model=List[ReviewResponse])
 def get_product_reviews(slug: str, db: DbSession):
     """Get approved reviews for a product."""

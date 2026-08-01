@@ -975,18 +975,25 @@ def update_variant(
 # Review Management
 # =============================================================================
 
-@router.get("/reviews/pending", response_model=PaginatedResponse[dict])
-def list_pending_reviews(
+_REVIEW_STATUSES = {"pending", "approved", "rejected"}
+
+
+@router.get("/reviews", response_model=PaginatedResponse[dict])
+def list_reviews(
     db: DbSession,
     admin_user: AdminUser,
+    status: str = Query("pending"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
-    """List pending reviews for moderation."""
+    """List reviews filtered by moderation status (pending/approved/rejected)."""
+    if status not in _REVIEW_STATUSES:
+        raise HTTPException(status_code=422, detail=f"status debe ser uno de: {', '.join(_REVIEW_STATUSES)}")
+
     query = db.query(Review).options(
         joinedload(Review.product),
         joinedload(Review.user)
-    ).filter(Review.status == "pending").order_by(Review.created_at.desc())
+    ).filter(Review.status == status).order_by(Review.created_at.desc())
 
     total = query.count()
     reviews = query.offset((page - 1) * page_size).limit(page_size).all()
@@ -1000,6 +1007,7 @@ def list_pending_reviews(
             "title": r.title,
             "comment": r.comment,
             "is_verified_purchase": r.is_verified_purchase,
+            "status": r.status,
             "created_at": r.created_at,
         }
         for r in reviews
@@ -1029,3 +1037,4 @@ def reject_review(review_id: int, db: DbSession, admin_user: AdminUser):
     review.status = "rejected"
     db.commit()
     return Message(message="Review rechazada")
+
