@@ -96,7 +96,24 @@ def get_dashboard(db: DbSession, admin_user: AdminUser):
     today_start = datetime.combine(today, datetime.min.time())
     period_start = today_start - timedelta(days=30)
     prev_period_start = period_start - timedelta(days=30)
-    
+
+    # All-time totals
+    total_orders = db.query(func.count(Order.id)).filter(
+        Order.status != 'cancelled'
+    ).scalar() or 0
+
+    pending_orders = db.query(func.count(Order.id)).filter(
+        Order.status.in_(['pending_payment', 'paid', 'processing', 'shipped'])
+    ).scalar() or 0
+
+    total_revenue = db.query(func.sum(Order.total)).filter(
+        Order.status.in_(['paid', 'processing', 'shipped', 'delivered'])
+    ).scalar() or Decimal('0')
+
+    total_customers = db.query(func.count(User.id)).filter(
+        User.role == 'customer'
+    ).scalar() or 0
+
     # Today's orders
     orders_today = db.query(func.count(Order.id)).filter(
         Order.created_at >= today_start,
@@ -174,6 +191,10 @@ def get_dashboard(db: DbSession, admin_user: AdminUser):
     orders_by_status = {status: count for status, count in status_counts}
     
     return DashboardStats(
+        total_orders=total_orders,
+        pending_orders=pending_orders,
+        total_revenue=total_revenue,
+        total_customers=total_customers,
         orders_today=orders_today,
         revenue_today=revenue_today,
         orders_period=orders_period,

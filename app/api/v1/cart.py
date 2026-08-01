@@ -352,15 +352,26 @@ def apply_coupon(
 
     coupon = db.query(Coupon).filter(Coupon.code == coupon_data.code.upper()).first()
     if not coupon:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cupon no encontrado")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cupón no encontrado")
     if not coupon.is_valid:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cupon no valido o expirado")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cupón no válido o expirado")
 
     subtotal = cart.subtotal
     if subtotal < coupon.min_order_amount:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"El pedido minimo para este cupon es {coupon.min_order_amount}€"
+            detail=f"El pedido mínimo para este cupón es {coupon.min_order_amount}€"
+        )
+
+    already_used = db.query(Order).filter(
+        Order.user_id == current_user.id,
+        Order.coupon_code == coupon_data.code.upper(),
+        Order.status.in_(['paid', 'processing', 'shipped', 'delivered']),
+    ).first()
+    if already_used:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este cupón ya fue utilizado en un pedido anterior"
         )
 
     cart.coupon_code = coupon.code

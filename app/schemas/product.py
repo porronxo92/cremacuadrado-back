@@ -21,6 +21,16 @@ class CategoryCreate(CategoryBase):
     parent_id: Optional[int] = None
 
 
+class CategoryUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    slug: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+    sort_order: Optional[int] = None
+    parent_id: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
 class CategoryResponse(CategoryBase):
     id: int
     parent_id: Optional[int]
@@ -50,6 +60,26 @@ class ProductImageResponse(BaseModel):
         return normalize_image_url(v) or v
 
 
+class ProductImageCreate(BaseModel):
+    """Create a gallery image for a product or one of its variants."""
+    url: str
+    alt_text: Optional[str] = None
+    sort_order: int = 0
+    is_primary: bool = False
+    variant_id: Optional[int] = None  # None = product-level (catalog/home) image
+
+
+class ProductImageUpdate(BaseModel):
+    alt_text: Optional[str] = None
+    sort_order: Optional[int] = None
+    is_primary: Optional[bool] = None
+
+
+class ProductImageReorderItem(BaseModel):
+    id: int
+    sort_order: int
+
+
 # =============================================================================
 # Product Nutrition schemas
 # =============================================================================
@@ -66,6 +96,19 @@ class ProductNutritionResponse(BaseModel):
     salt: Optional[Decimal]
 
     model_config = {"from_attributes": True}
+
+
+class ProductNutritionUpsert(BaseModel):
+    """Create-or-update payload for a product's nutrition facts (per 100g)."""
+    energy_kcal: Optional[Decimal] = None
+    energy_kj: Optional[Decimal] = None
+    fat: Optional[Decimal] = None
+    saturated_fat: Optional[Decimal] = None
+    carbohydrates: Optional[Decimal] = None
+    sugars: Optional[Decimal] = None
+    fiber: Optional[Decimal] = None
+    proteins: Optional[Decimal] = None
+    salt: Optional[Decimal] = None
 
 
 # =============================================================================
@@ -88,6 +131,19 @@ class ProductVariantResponse(BaseModel):
     images: List[ProductImageResponse] = []
 
     model_config = {"from_attributes": True}
+
+
+class ProductVariantCreate(BaseModel):
+    """Create a new format/variant for an existing product."""
+    sku: Optional[str] = None
+    format: str = Field(..., min_length=1, max_length=20)
+    weight_grams: int = Field(..., gt=0)
+    price: Decimal = Field(..., ge=0)
+    compare_price: Optional[Decimal] = None
+    stock: int = Field(0, ge=0)
+    is_active: bool = True
+    sort_order: int = 0
+    image_url: Optional[str] = None
 
 
 # =============================================================================

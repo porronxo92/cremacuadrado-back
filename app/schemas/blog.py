@@ -14,6 +14,20 @@ class BlogCategoryResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class BlogCategoryCreate(BaseModel):
+    """Blog category creation schema. Slug is auto-generated from name if omitted."""
+    name: str = Field(..., min_length=1, max_length=100)
+    slug: Optional[str] = Field(None, max_length=100)
+    description: Optional[str] = None
+
+
+class BlogCategoryUpdate(BaseModel):
+    """Blog category update schema."""
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    slug: Optional[str] = Field(None, max_length=100)
+    description: Optional[str] = None
+
+
 class BlogPostBase(BaseModel):
     """Base blog post schema."""
     title: str = Field(..., min_length=1, max_length=200)
@@ -71,5 +85,6 @@ class BlogPostListResponse(BaseModel):
     featured_image_url: Optional[str]
     categories: List[BlogCategoryResponse]
     published_at: Optional[datetime]
+    status: Optional[str] = None
     
     model_config = {"from_attributes": True}

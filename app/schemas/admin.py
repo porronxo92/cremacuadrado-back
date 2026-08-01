@@ -7,6 +7,12 @@ from pydantic import BaseModel
 
 class DashboardStats(BaseModel):
     """Dashboard statistics."""
+    # All-time totals
+    total_orders: int
+    pending_orders: int
+    total_revenue: Decimal
+    total_customers: int
+
     # Today's stats
     orders_today: int
     revenue_today: Decimal
