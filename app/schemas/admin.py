@@ -73,3 +73,27 @@ class CustomerStats(BaseModel):
     new_customers_period: int
     returning_customers: int
     average_orders_per_customer: float
+
+
+class AdminUserItem(BaseModel):
+    """User row for the admin users list."""
+    id: int
+    email: str
+    first_name: str
+    last_name: str
+    phone: Optional[str]
+    role: str
+    is_active: bool
+    email_verified: bool
+    marketing_opt_in: bool
+    created_at: datetime
+    total_orders: int
+    total_spent: Decimal
+    order_ids: List[int]
+
+
+class AdminUsersListResponse(BaseModel):
+    """Paginated response for admin users list."""
+    data: List[AdminUserItem]
+    total: int
+    pages: int

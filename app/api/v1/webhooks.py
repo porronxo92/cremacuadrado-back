@@ -16,7 +16,7 @@ from app.api.deps import DbSession
 logger = logging.getLogger("cremacuadrado.webhooks")
 from app.models.order import Order, OrderItem, Coupon
 from app.models.cart import Cart, CartItem
-from app.models.payment import PaymentIntent as PaymentIntentModel, StripeWebhookEvent
+from app.models.payment import PaymentIntent as PaymentIntentModel, StripeWebhookEvent, Refund
 from app.services import stripe_service
 from app.services.email import EmailService, send_order_confirmation, OrderEmailData
 from app.config import settings
@@ -28,6 +28,9 @@ HANDLED_EVENTS = {
     "payment_intent.payment_failed",
     "payment_intent.canceled",
     "payment_intent.processing",
+    "charge.refunded",
+    "charge.dispute.created",
+    "charge.dispute.closed",
 }
 
 
@@ -99,6 +102,12 @@ async def stripe_webhook(request: Request, db: DbSession):
             _handle_payment_canceled(db, data)
         elif event_type == "payment_intent.processing":
             _update_pi_status(db, data["id"], "processing")
+        elif event_type == "charge.refunded":
+            _handle_charge_refunded(db, data)
+        elif event_type == "charge.dispute.created":
+            _handle_dispute_created(db, data)
+        elif event_type == "charge.dispute.closed":
+            _handle_dispute_closed(db, data)
 
         existing.processed = True
         existing.processed_at = datetime.now(timezone.utc)
@@ -243,18 +252,20 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
             logger.info("Cart cleared via user_id fallback: user_id=%s order=%s", order.user_id, order.order_number)
 
     # Generate Correos shipment (defensive: must NOT break payment processing).
-    # In mock mode (CORREOS_ENABLED=False) this returns a fake localizador.
+    # While CORREOS_ENABLED=False, skip entirely — no API calls, no mock localizador.
+    # The tracking number will be entered manually by an admin once the label is ready.
     tracking_number = None
-    try:
-        from app.services.correos import create_shipment_for_order
-        shipment = create_shipment_for_order(db, order_with_items)
-        if shipment and shipment.localizador:
-            tracking_number = shipment.localizador
-    except Exception as exc:
-        logger.error(
-            "Correos shipment failed: order=%s error=%s",
-            order.order_number, exc, exc_info=True,
-        )
+    if settings.CORREOS_ENABLED:
+        try:
+            from app.services.correos import create_shipment_for_order
+            shipment = create_shipment_for_order(db, order_with_items)
+            if shipment and shipment.localizador:
+                tracking_number = shipment.localizador
+        except Exception as exc:
+            logger.error(
+                "Correos shipment failed: order=%s error=%s",
+                order.order_number, exc, exc_info=True,
+            )
 
     # Send confirmation email with full order data
     customer_email = order.customer_email
@@ -339,3 +350,134 @@ def _handle_payment_canceled(db: Session, data: dict) -> None:
         order.status = "cancelled"
         logger.info("Payment canceled: order=%s pi=%s", order.order_number, stripe_pi_id)
     _update_pi_status(db, stripe_pi_id, "canceled")
+
+
+def _restock_order_items(db: Session, order: Order) -> None:
+    """Return every item's quantity back to stock (variant or legacy product)."""
+    from app.models.product import Product, ProductVariant
+
+    order_with_items = (
+        db.query(Order).options(joinedload(Order.items)).filter(Order.id == order.id).first()
+    )
+    for item in order_with_items.items:
+        if item.product_variant_id:
+            variant = (
+                db.query(ProductVariant)
+                .filter(ProductVariant.id == item.product_variant_id)
+                .with_for_update()
+                .first()
+            )
+            if variant:
+                variant.stock += item.quantity
+        elif item.product_id:
+            product = (
+                db.query(Product)
+                .filter(Product.id == item.product_id)
+                .with_for_update()
+                .first()
+            )
+            if product:
+                product.stock += item.quantity
+
+
+def _handle_charge_refunded(db: Session, data: dict) -> None:
+    """Handle charge.refunded — covers both full and partial refunds."""
+    stripe_pi_id = data.get("payment_intent")
+    if not stripe_pi_id:
+        logger.warning("charge.refunded without payment_intent, charge=%s", data.get("id"))
+        return
+
+    order = _get_order_by_pi(db, stripe_pi_id)
+    if not order:
+        logger.warning("charge.refunded: no order found for pi=%s", stripe_pi_id)
+        return
+
+    amount_refunded = data.get("amount_refunded", 0)
+    amount_total = data.get("amount", 0)
+    is_full_refund = amount_total > 0 and amount_refunded >= amount_total
+
+    # Persist each new refund object from the charge (idempotent on stripe_refund_id)
+    for stripe_refund in (data.get("refunds") or {}).get("data", []):
+        existing = db.query(Refund).filter(Refund.stripe_refund_id == stripe_refund["id"]).first()
+        if existing:
+            existing.status = stripe_refund["status"]
+            continue
+        pi_record = db.query(PaymentIntentModel).filter(
+            PaymentIntentModel.stripe_payment_intent_id == stripe_pi_id
+        ).first()
+        db.add(Refund(
+            order_id=order.id,
+            payment_intent_id=pi_record.id if pi_record else None,
+            stripe_refund_id=stripe_refund["id"],
+            amount=stripe_refund["amount"],
+            reason=stripe_refund.get("reason"),
+            status=stripe_refund["status"],
+        ))
+
+    if order.status != "refunded":
+        order.status = "refunded" if is_full_refund else "partially_refunded"
+        logger.info(
+            "Order refunded: order=%s pi=%s amount=%s full=%s",
+            order.order_number, stripe_pi_id, amount_refunded, is_full_refund,
+        )
+        if is_full_refund:
+            _restock_order_items(db, order)
+
+        customer_email = order.customer_email
+        if customer_email:
+            try:
+                EmailService.send_order_status_update_email(
+                    to_email=customer_email,
+                    order_number=order.order_number,
+                    customer_name=order.shipping_address.get("first_name", "Cliente"),
+                    new_status="refunded",
+                )
+            except Exception as exc:
+                logger.error("Refund email failed: order=%s error=%s", order.order_number, exc, exc_info=True)
+        try:
+            EmailService.send_admin_status_change(order_number=order.order_number, new_status="refunded")
+        except Exception as exc:
+            logger.error("Admin refund notification failed: order=%s error=%s", order.order_number, exc)
+
+
+def _handle_dispute_created(db: Session, data: dict) -> None:
+    """Handle charge.dispute.created — a chargeback was opened by the customer's bank."""
+    stripe_pi_id = data.get("payment_intent")
+    order = _get_order_by_pi(db, stripe_pi_id) if stripe_pi_id else None
+    if not order:
+        logger.warning("charge.dispute.created: no order found for pi=%s", stripe_pi_id)
+        return
+
+    order.admin_notes = (order.admin_notes or "") + (
+        f"\n[Disputa Stripe] id={data.get('id')} motivo={data.get('reason')} importe={data.get('amount')}"
+    )
+    logger.warning(
+        "Dispute opened: order=%s pi=%s dispute=%s reason=%s",
+        order.order_number, stripe_pi_id, data.get("id"), data.get("reason"),
+    )
+    try:
+        EmailService.send_admin_status_change(order_number=order.order_number, new_status="disputed")
+    except Exception as exc:
+        logger.error("Admin dispute notification failed: order=%s error=%s", order.order_number, exc)
+
+
+def _handle_dispute_closed(db: Session, data: dict) -> None:
+    """Handle charge.dispute.closed — the dispute was resolved (won/lost/warning_closed)."""
+    stripe_pi_id = data.get("payment_intent")
+    order = _get_order_by_pi(db, stripe_pi_id) if stripe_pi_id else None
+    if not order:
+        logger.warning("charge.dispute.closed: no order found for pi=%s", stripe_pi_id)
+        return
+
+    outcome = data.get("status", "unknown")
+    order.admin_notes = (order.admin_notes or "") + f"\n[Disputa Stripe] resuelta: {outcome}"
+    logger.info("Dispute closed: order=%s pi=%s outcome=%s", order.order_number, stripe_pi_id, outcome)
+
+    if outcome == "lost" and order.status != "refunded":
+        order.status = "refunded"
+        _restock_order_items(db, order)
+
+    try:
+        EmailService.send_admin_status_change(order_number=order.order_number, new_status=f"disputa-{outcome}")
+    except Exception as exc:
+        logger.error("Admin dispute-closed notification failed: order=%s error=%s", order.order_number, exc)

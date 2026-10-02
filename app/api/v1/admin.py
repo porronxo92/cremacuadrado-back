@@ -17,7 +17,7 @@ logger = logging.getLogger("cremacuadrado.admin")
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, case
 
 from app.api.deps import DbSession, AdminUser
 from app.models.user import User
@@ -26,7 +26,7 @@ from app.models.order import Order, OrderItem
 from app.models.shipment import Shipment, ShipmentEvent
 from app.schemas.order import OrderResponse, OrderStatusUpdate
 from app.schemas.product import ProductResponse, ProductVariantResponse
-from app.schemas.admin import DashboardStats
+from app.schemas.admin import DashboardStats, AdminUserItem, AdminUsersListResponse
 from app.schemas.common import Message, PaginatedResponse
 from app.services.email import EmailService
 from app.services import blob_service
@@ -208,6 +208,111 @@ def get_dashboard(db: DbSession, admin_user: AdminUser):
 
 
 # =============================================================================
+# User Management
+# =============================================================================
+
+VALID_USER_SORT_FIELDS = {
+    "created_at", "email", "first_name", "last_name", "total_orders", "total_spent",
+}
+
+
+@router.get("/users", response_model=AdminUsersListResponse)
+def list_all_users(
+    db: DbSession,
+    admin_user: AdminUser,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    search: Optional[str] = None,
+    role: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    sort: Optional[str] = None,
+):
+    """List all users with filters, pagination and order stats (admin only)."""
+    paid_order_statuses = ('paid', 'processing', 'shipped', 'delivered')
+
+    orders_count = func.count(Order.id).label("total_orders")
+    orders_spent = func.coalesce(
+        func.sum(
+            case((Order.status.in_(paid_order_statuses), Order.total), else_=0)
+        ),
+        0,
+    ).label("total_spent")
+
+    query = (
+        db.query(User, orders_count, orders_spent)
+        .outerjoin(Order, Order.user_id == User.id)
+        .group_by(User.id)
+    )
+
+    if search:
+        like = f"%{search}%"
+        query = query.filter(
+            User.email.ilike(like) |
+            User.first_name.ilike(like) |
+            User.last_name.ilike(like) |
+            User.phone.ilike(like)
+        )
+
+    if role:
+        query = query.filter(User.role == role)
+
+    if is_active is not None:
+        query = query.filter(User.is_active == is_active)
+
+    # Count total distinct users matching filters (before pagination)
+    total = query.distinct().with_entities(User.id).count()
+
+    # Sorting
+    sort_field = sort if sort in VALID_USER_SORT_FIELDS else "created_at"
+    if sort_field == "total_orders":
+        order_col = orders_count
+    elif sort_field == "total_spent":
+        order_col = orders_spent
+    else:
+        order_col = getattr(User, sort_field)
+    query = query.order_by(order_col.desc())
+
+    offset = (page - 1) * limit
+    rows = query.offset(offset).limit(limit).all()
+
+    # Fetch order ids for the users on this page (portable across DB engines)
+    user_ids = [user.id for user, _, _ in rows]
+    order_ids_by_user: dict[int, list[int]] = {uid: [] for uid in user_ids}
+    if user_ids:
+        id_rows = (
+            db.query(Order.user_id, Order.id)
+            .filter(Order.user_id.in_(user_ids))
+            .order_by(Order.created_at.desc())
+            .all()
+        )
+        for user_id, order_id in id_rows:
+            order_ids_by_user[user_id].append(order_id)
+
+    data = [
+        AdminUserItem(
+            id=user.id,
+            email=user.email,
+            first_name=user.first_name,
+            last_name=user.last_name,
+            phone=user.phone,
+            role=user.role,
+            is_active=user.is_active,
+            email_verified=user.email_verified,
+            marketing_opt_in=user.marketing_opt_in,
+            created_at=user.created_at,
+            total_orders=total_orders,
+            total_spent=total_spent,
+            order_ids=order_ids_by_user.get(user.id, []),
+        )
+        for user, total_orders, total_spent in rows
+    ]
+
+    pages = (total + limit - 1) // limit if limit > 0 else 0
+
+    return AdminUsersListResponse(data=data, total=total, pages=pages)
+
+
+# =============================================================================
 # Order Management
 # =============================================================================
 
@@ -270,6 +375,7 @@ def list_all_orders(
             payment_method=order.payment_method,
             tracking_number=order.tracking_number,
             customer_notes=order.customer_notes,
+            customer_email=order.customer_email,
             items=order.items,
             item_count=order.item_count,
             created_at=order.created_at,
@@ -312,6 +418,7 @@ def get_order_admin(order_id: int, db: DbSession, admin_user: AdminUser):
         payment_method=order.payment_method,
         tracking_number=order.tracking_number,
         customer_notes=order.customer_notes,
+        customer_email=order.customer_email,
         items=order.items,
         item_count=order.item_count,
         created_at=order.created_at,
@@ -340,6 +447,7 @@ def _do_update_order_status(order_id: int, status_data: OrderStatusUpdate, db, a
         )
 
     old_status = order.status
+    had_tracking = bool(order.tracking_number)
     order.status = status_data.status
     
     # Update timestamps
@@ -361,7 +469,10 @@ def _do_update_order_status(order_id: int, status_data: OrderStatusUpdate, db, a
 
     if old_status != status_data.status:
         # Notify customer
-        if status_data.status == "shipped" and order.tracking_number:
+        if status_data.status == "shipped" and order.tracking_number and had_tracking:
+            # Shipped email already sent when the tracking number was first set
+            pass
+        elif status_data.status == "shipped" and order.tracking_number:
             sent = EmailService.send_order_shipped_email(
                 to_email=customer_email,
                 order_number=order.order_number,
@@ -471,11 +582,16 @@ def update_tracking_number(
     admin_user: AdminUser,
     tracking_number: str = Query(..., description="Número de seguimiento Correos"),
 ):
-    """Manually set or update the tracking number for an order."""
+    """Manually set or update the tracking number for an order.
+
+    Sends the shipping notification email to the customer the first time a
+    tracking number is set (CORREOS_ENABLED=False manual workflow).
+    """
     order = db.query(Order).options(joinedload(Order.items)).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
 
+    is_new_tracking = not order.tracking_number
     order.tracking_number = tracking_number
 
     # Also update the associated shipment localizador if one exists
@@ -485,6 +601,20 @@ def update_tracking_number(
 
     db.commit()
     db.refresh(order)
+
+    if is_new_tracking:
+        customer_email = order.customer_email
+        if customer_email:
+            sent = EmailService.send_order_shipped_email(
+                to_email=customer_email,
+                order_number=order.order_number,
+                customer_name=order.shipping_address.get("first_name", "Cliente"),
+                tracking_number=tracking_number,
+            )
+            if not sent:
+                logger.error("Shipping email failed: order=%s to=%s", order.order_number, customer_email)
+            else:
+                logger.info("Shipping email sent: order=%s to=%s", order.order_number, customer_email)
 
     return OrderResponse(
         id=order.id, order_number=order.order_number, status=order.status,

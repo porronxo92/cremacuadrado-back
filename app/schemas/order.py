@@ -123,6 +123,7 @@ class OrderResponse(BaseModel):
     payment_method: Optional[str]
     tracking_number: Optional[str]
     customer_notes: Optional[str]
+    customer_email: Optional[str] = None
     items: List[OrderItemResponse]
     item_count: int
     created_at: datetime
