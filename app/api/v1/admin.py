@@ -322,12 +322,17 @@ def list_all_orders(
     admin_user: AdminUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    limit: Optional[int] = Query(None, ge=1, le=100),
     status: Optional[str] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     search: Optional[str] = None,
 ):
     """List all orders with filters (admin only)."""
+    # Accept 'limit' as an alias for 'page_size' (frontend compatibility)
+    if limit is not None:
+        page_size = limit
+
     query = db.query(Order).options(
         joinedload(Order.items),
         joinedload(Order.user)
@@ -344,9 +349,11 @@ def list_all_orders(
         query = query.filter(Order.created_at <= date_to)
     
     if search:
-        query = query.filter(
-            Order.order_number.ilike(f"%{search}%") |
-            Order.guest_email.ilike(f"%{search}%")
+        like = f"%{search}%"
+        query = query.outerjoin(User, Order.user_id == User.id).filter(
+            Order.order_number.ilike(like) |
+            Order.guest_email.ilike(like) |
+            User.email.ilike(like)
         )
     
     # Order by date
