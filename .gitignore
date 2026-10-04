@@ -57,3 +57,5 @@ build/
 static/images/products/*
 !static/images/products/.gitkeep
 prod.env
+
+.vercel
