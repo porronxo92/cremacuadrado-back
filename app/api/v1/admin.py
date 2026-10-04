@@ -2,7 +2,6 @@
 Admin API endpoints - Dashboard, Order Management, Product CRUD.
 """
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 from typing import List, Optional
 import csv
 import io
@@ -17,16 +16,18 @@ logger = logging.getLogger("cremacuadrado.admin")
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, and_, case
+from sqlalchemy import func
 
 from app.api.deps import DbSession, AdminUser
 from app.models.user import User
 from app.models.product import Product, Category, Review, ProductVariant, ProductImage
 from app.models.order import Order, OrderItem
+from app.models.payment import PaymentIntent as PaymentIntentModel, Refund
 from app.models.shipment import Shipment, ShipmentEvent
-from app.schemas.order import OrderResponse, OrderStatusUpdate
+from app.schemas.order import OrderStatusUpdate
 from app.schemas.product import ProductResponse, ProductVariantResponse
-from app.schemas.admin import DashboardStats, AdminUserItem, AdminUsersListResponse
+from app.schemas.admin import AdminOrderNotes, AdminOrderResponse
+from app.services.coupon_redemptions import record_redemption, revert_redemption
 from app.schemas.common import Message, PaginatedResponse
 from app.services.email import EmailService
 from app.services import blob_service
@@ -36,8 +37,9 @@ router = APIRouter()
 
 VALID_ORDER_STATUSES = {
     "pending_payment", "payment_failed", "paid",
-    "processing", "shipped", "delivered", "cancelled", "refunded",
+    "processing", "shipped", "delivered", "cancelled", "refunded", "partially_refunded",
 }
+PAID_ORDER_STATUSES = ("paid", "processing", "shipped", "delivered", "partially_refunded")
 
 _ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".avif", ".gif"}
 
@@ -86,331 +88,19 @@ def _product_response(product: Product) -> ProductResponse:
 
 
 # =============================================================================
-# Dashboard
-# =============================================================================
-
-@router.get("/dashboard", response_model=DashboardStats)
-def get_dashboard(db: DbSession, admin_user: AdminUser):
-    """Get dashboard statistics."""
-    today = datetime.now(timezone.utc).date()
-    today_start = datetime.combine(today, datetime.min.time())
-    period_start = today_start - timedelta(days=30)
-    prev_period_start = period_start - timedelta(days=30)
-
-    # All-time totals
-    total_orders = db.query(func.count(Order.id)).filter(
-        Order.status != 'cancelled'
-    ).scalar() or 0
-
-    pending_orders = db.query(func.count(Order.id)).filter(
-        Order.status.in_(['pending_payment', 'paid', 'processing', 'shipped'])
-    ).scalar() or 0
-
-    total_revenue = db.query(func.sum(Order.total)).filter(
-        Order.status.in_(['paid', 'processing', 'shipped', 'delivered'])
-    ).scalar() or Decimal('0')
-
-    total_customers = db.query(func.count(User.id)).filter(
-        User.role == 'customer'
-    ).scalar() or 0
-
-    # Today's orders
-    orders_today = db.query(func.count(Order.id)).filter(
-        Order.created_at >= today_start,
-        Order.status != 'cancelled'
-    ).scalar() or 0
-    
-    revenue_today = db.query(func.sum(Order.total)).filter(
-        Order.created_at >= today_start,
-        Order.status.in_(['paid', 'processing', 'shipped', 'delivered'])
-    ).scalar() or Decimal('0')
-    
-    # Period orders (30 days)
-    orders_period = db.query(func.count(Order.id)).filter(
-        Order.created_at >= period_start,
-        Order.status != 'cancelled'
-    ).scalar() or 0
-    
-    revenue_period = db.query(func.sum(Order.total)).filter(
-        Order.created_at >= period_start,
-        Order.status.in_(['paid', 'processing', 'shipped', 'delivered'])
-    ).scalar() or Decimal('0')
-    
-    # Previous period for comparison
-    orders_prev = db.query(func.count(Order.id)).filter(
-        and_(Order.created_at >= prev_period_start, Order.created_at < period_start),
-        Order.status != 'cancelled'
-    ).scalar() or 0
-    
-    revenue_prev = db.query(func.sum(Order.total)).filter(
-        and_(Order.created_at >= prev_period_start, Order.created_at < period_start),
-        Order.status.in_(['paid', 'processing', 'shipped', 'delivered'])
-    ).scalar() or Decimal('0')
-    
-    # Growth calculations
-    orders_growth = None
-    if orders_prev > 0:
-        orders_growth = ((orders_period - orders_prev) / orders_prev) * 100
-    
-    revenue_growth = None
-    if revenue_prev > 0:
-        revenue_growth = float((revenue_period - revenue_prev) / revenue_prev * 100)
-    
-    # Average order value
-    avg_order_value = revenue_period / orders_period if orders_period > 0 else Decimal('0')
-    
-    # Top products
-    top_products_query = db.query(
-        Product.name,
-        func.sum(OrderItem.quantity).label('quantity_sold'),
-        func.sum(OrderItem.total).label('revenue')
-    ).join(OrderItem).join(Order).filter(
-        Order.created_at >= period_start,
-        Order.status.in_(['paid', 'processing', 'shipped', 'delivered'])
-    ).group_by(Product.id, Product.name).order_by(
-        func.sum(OrderItem.total).desc()
-    ).limit(5).all()
-    
-    top_products = [
-        {
-            "product_name": name,
-            "quantity_sold": qty,
-            "revenue": float(rev)
-        }
-        for name, qty, rev in top_products_query
-    ]
-    
-    # Orders by status
-    status_counts = db.query(
-        Order.status,
-        func.count(Order.id)
-    ).filter(
-        Order.created_at >= period_start
-    ).group_by(Order.status).all()
-    
-    orders_by_status = {status: count for status, count in status_counts}
-    
-    return DashboardStats(
-        total_orders=total_orders,
-        pending_orders=pending_orders,
-        total_revenue=total_revenue,
-        total_customers=total_customers,
-        orders_today=orders_today,
-        revenue_today=revenue_today,
-        orders_period=orders_period,
-        revenue_period=revenue_period,
-        average_order_value=avg_order_value,
-        top_products=top_products,
-        orders_by_status=orders_by_status,
-        orders_growth=orders_growth,
-        revenue_growth=revenue_growth,
-    )
-
-
-# =============================================================================
-# User Management
-# =============================================================================
-
-VALID_USER_SORT_FIELDS = {
-    "created_at", "email", "first_name", "last_name", "total_orders", "total_spent",
-}
-
-
-@router.get("/users", response_model=AdminUsersListResponse)
-def list_all_users(
-    db: DbSession,
-    admin_user: AdminUser,
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-    search: Optional[str] = None,
-    role: Optional[str] = None,
-    is_active: Optional[bool] = None,
-    sort: Optional[str] = None,
-):
-    """List all users with filters, pagination and order stats (admin only)."""
-    paid_order_statuses = ('paid', 'processing', 'shipped', 'delivered')
-
-    orders_count = func.count(Order.id).label("total_orders")
-    orders_spent = func.coalesce(
-        func.sum(
-            case((Order.status.in_(paid_order_statuses), Order.total), else_=0)
-        ),
-        0,
-    ).label("total_spent")
-
-    query = (
-        db.query(User, orders_count, orders_spent)
-        .outerjoin(Order, Order.user_id == User.id)
-        .group_by(User.id)
-    )
-
-    if search:
-        like = f"%{search}%"
-        query = query.filter(
-            User.email.ilike(like) |
-            User.first_name.ilike(like) |
-            User.last_name.ilike(like) |
-            User.phone.ilike(like)
-        )
-
-    if role:
-        query = query.filter(User.role == role)
-
-    if is_active is not None:
-        query = query.filter(User.is_active == is_active)
-
-    # Count total distinct users matching filters (before pagination)
-    total = query.distinct().with_entities(User.id).count()
-
-    # Sorting
-    sort_field = sort if sort in VALID_USER_SORT_FIELDS else "created_at"
-    if sort_field == "total_orders":
-        order_col = orders_count
-    elif sort_field == "total_spent":
-        order_col = orders_spent
-    else:
-        order_col = getattr(User, sort_field)
-    query = query.order_by(order_col.desc())
-
-    offset = (page - 1) * limit
-    rows = query.offset(offset).limit(limit).all()
-
-    # Fetch order ids for the users on this page (portable across DB engines)
-    user_ids = [user.id for user, _, _ in rows]
-    order_ids_by_user: dict[int, list[int]] = {uid: [] for uid in user_ids}
-    if user_ids:
-        id_rows = (
-            db.query(Order.user_id, Order.id)
-            .filter(Order.user_id.in_(user_ids))
-            .order_by(Order.created_at.desc())
-            .all()
-        )
-        for user_id, order_id in id_rows:
-            order_ids_by_user[user_id].append(order_id)
-
-    data = [
-        AdminUserItem(
-            id=user.id,
-            email=user.email,
-            first_name=user.first_name,
-            last_name=user.last_name,
-            phone=user.phone,
-            role=user.role,
-            is_active=user.is_active,
-            email_verified=user.email_verified,
-            marketing_opt_in=user.marketing_opt_in,
-            created_at=user.created_at,
-            total_orders=total_orders,
-            total_spent=total_spent,
-            order_ids=order_ids_by_user.get(user.id, []),
-        )
-        for user, total_orders, total_spent in rows
-    ]
-
-    pages = (total + limit - 1) // limit if limit > 0 else 0
-
-    return AdminUsersListResponse(data=data, total=total, pages=pages)
-
-
-# =============================================================================
 # Order Management
 # =============================================================================
 
-@router.get("/orders", response_model=PaginatedResponse[OrderResponse])
-def list_all_orders(
-    db: DbSession,
-    admin_user: AdminUser,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    limit: Optional[int] = Query(None, ge=1, le=100),
-    status: Optional[str] = None,
-    date_from: Optional[datetime] = None,
-    date_to: Optional[datetime] = None,
-    search: Optional[str] = None,
-):
-    """List all orders with filters (admin only)."""
-    # Accept 'limit' as an alias for 'page_size' (frontend compatibility)
-    if limit is not None:
-        page_size = limit
-
-    query = db.query(Order).options(
-        joinedload(Order.items),
-        joinedload(Order.user)
-    )
-    
-    # Filters
-    if status:
-        query = query.filter(Order.status == status)
-    
-    if date_from:
-        query = query.filter(Order.created_at >= date_from)
-    
-    if date_to:
-        query = query.filter(Order.created_at <= date_to)
-    
-    if search:
-        like = f"%{search}%"
-        query = query.outerjoin(User, Order.user_id == User.id).filter(
-            Order.order_number.ilike(like) |
-            Order.guest_email.ilike(like) |
-            User.email.ilike(like)
-        )
-    
-    # Order by date
-    query = query.order_by(Order.created_at.desc())
-    
-    # Count total
-    total = query.count()
-    
-    # Paginate
-    offset = (page - 1) * page_size
-    orders = query.offset(offset).limit(page_size).all()
-    
-    items = [
-        OrderResponse(
-            id=order.id,
-            order_number=order.order_number,
-            status=order.status,
-            subtotal=order.subtotal,
-            shipping_cost=order.shipping_cost,
-            discount=order.discount,
-            coupon_code=order.coupon_code,
-            tax=order.tax,
-            total=order.total,
-            shipping_address=order.shipping_address,
-            billing_address=order.billing_address,
-            payment_method=order.payment_method,
-            tracking_number=order.tracking_number,
-            customer_notes=order.customer_notes,
-            customer_email=order.customer_email,
-            items=order.items,
-            item_count=order.item_count,
-            created_at=order.created_at,
-            paid_at=order.paid_at,
-            shipped_at=order.shipped_at,
-            delivered_at=order.delivered_at,
-        )
-        for order in orders
-    ]
-    
-    return PaginatedResponse.create(items, total, page, page_size)
+ORDER_SORT_FIELDS = {"created_at", "total", "order_number", "status", "paid_at"}
 
 
-@router.get("/orders/{order_id}", response_model=OrderResponse)
-def get_order_admin(order_id: int, db: DbSession, admin_user: AdminUser):
-    """Get order details (admin)."""
-    order = db.query(Order).options(
-        joinedload(Order.items),
-        joinedload(Order.user)
-    ).filter(Order.id == order_id).first()
-    
-    if not order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Pedido no encontrado"
-        )
-    
-    return OrderResponse(
+def _order_resp(order: Order) -> AdminOrderResponse:
+    """Build the admin order payload (always includes customer email/name)."""
+    addr = order.shipping_address or {}
+    name = f"{addr.get('first_name', '')} {addr.get('last_name', '')}".strip()
+    if not name and order.user:
+        name = order.user.full_name
+    return AdminOrderResponse(
         id=order.id,
         order_number=order.order_number,
         status=order.status,
@@ -420,7 +110,7 @@ def get_order_admin(order_id: int, db: DbSession, admin_user: AdminUser):
         coupon_code=order.coupon_code,
         tax=order.tax,
         total=order.total,
-        shipping_address=order.shipping_address,
+        shipping_address=addr,
         billing_address=order.billing_address,
         payment_method=order.payment_method,
         tracking_number=order.tracking_number,
@@ -432,13 +122,159 @@ def get_order_admin(order_id: int, db: DbSession, admin_user: AdminUser):
         paid_at=order.paid_at,
         shipped_at=order.shipped_at,
         delivered_at=order.delivered_at,
+        user_id=order.user_id,
+        guest_email=order.guest_email,
+        customer_name=name or None,
+        admin_notes=order.admin_notes,
+        payment_intent_id=order.payment_intent_id,
+        shipping_status=order.shipping_status,
+        updated_at=order.updated_at,
     )
+
+
+def _filtered_orders_query(
+    db, status_filter=None, date_from=None, date_to=None, search=None,
+    coupon_code=None, user_id=None,
+):
+    query = db.query(Order).options(joinedload(Order.items), joinedload(Order.user))
+    if status_filter:
+        statuses = [st.strip() for st in status_filter.split(",") if st.strip()]
+        query = query.filter(Order.status.in_(statuses))
+    if date_from:
+        query = query.filter(Order.created_at >= date_from)
+    if date_to:
+        # A bare date (00:00:00) means "until the end of that day"
+        if date_to.hour == 0 and date_to.minute == 0 and date_to.second == 0:
+            query = query.filter(Order.created_at < date_to + timedelta(days=1))
+        else:
+            query = query.filter(Order.created_at <= date_to)
+    if coupon_code:
+        query = query.filter(func.upper(Order.coupon_code) == coupon_code.strip().upper())
+    if user_id:
+        query = query.filter(Order.user_id == user_id)
+    if search:
+        like = f"%{search.strip()}%"
+        query = query.outerjoin(User, Order.user_id == User.id).filter(
+            Order.order_number.ilike(like)
+            | Order.guest_email.ilike(like)
+            | User.email.ilike(like)
+            | Order.shipping_address_json.ilike(like)
+            | Order.tracking_number.ilike(like)
+        )
+    return query
+
+
+@router.get("/orders", response_model=PaginatedResponse[AdminOrderResponse])
+def list_all_orders(
+    db: DbSession,
+    admin_user: AdminUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    limit: Optional[int] = Query(None, ge=1, le=100),
+    status: Optional[str] = Query(None, description="Uno o varios estados separados por coma"),
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    search: Optional[str] = None,
+    coupon_code: Optional[str] = None,
+    user_id: Optional[int] = None,
+    sort: str = "created_at",
+    order: str = Query("desc", pattern="^(asc|desc)$"),
+):
+    """List orders with filters, sorting and pagination (admin only)."""
+    # Accept 'limit' as an alias for 'page_size' (frontend compatibility)
+    if limit is not None:
+        page_size = limit
+
+    query = _filtered_orders_query(db, status, date_from, date_to, search, coupon_code, user_id)
+    total = query.order_by(None).count()
+
+    col = getattr(Order, sort if sort in ORDER_SORT_FIELDS else "created_at")
+    col = col.asc() if order == "asc" else col.desc()
+    orders = (
+        query.order_by(col.nulls_last(), Order.id.desc())
+        .offset((page - 1) * page_size).limit(page_size).all()
+    )
+    return PaginatedResponse.create([_order_resp(o) for o in orders], total, page, page_size)
+
+
+@router.get("/orders/{order_id}", response_model=AdminOrderResponse)
+def get_order_admin(order_id: int, db: DbSession, admin_user: AdminUser):
+    """Get order details (admin)."""
+    order = db.query(Order).options(
+        joinedload(Order.items),
+        joinedload(Order.user)
+    ).filter(Order.id == order_id).first()
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pedido no encontrado"
+        )
+
+    return _order_resp(order)
+
+
+@router.patch("/orders/{order_id}/notes", response_model=AdminOrderResponse)
+def update_order_notes(order_id: int, data: AdminOrderNotes, db: DbSession, admin_user: AdminUser):
+    """Save internal admin notes for an order (never shown to the customer)."""
+    order = db.query(Order).options(
+        joinedload(Order.items), joinedload(Order.user)
+    ).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
+    order.admin_notes = (data.admin_notes or "").strip() or None
+    db.commit()
+    db.refresh(order)
+    return _order_resp(order)
+
+
+@router.get("/orders/{order_id}/payments")
+def get_order_payments(order_id: int, db: DbSession, admin_user: AdminUser):
+    """Stripe payment intents and refunds linked to an order."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
+
+    intents = (
+        db.query(PaymentIntentModel)
+        .filter(PaymentIntentModel.order_id == order_id)
+        .order_by(PaymentIntentModel.created_at.desc())
+        .all()
+    )
+    refunds = db.query(Refund).filter(Refund.order_id == order_id).order_by(Refund.created_at.desc()).all()
+    return {
+        "payment_intents": [
+            {
+                "id": pi.id,
+                "stripe_payment_intent_id": pi.stripe_payment_intent_id,
+                "amount": pi.amount / 100,
+                "currency": pi.currency,
+                "status": pi.status,
+                "payment_method_type": pi.payment_method_type,
+                "created_at": pi.created_at,
+                "updated_at": pi.updated_at,
+            }
+            for pi in intents
+        ],
+        "refunds": [
+            {
+                "id": r.id,
+                "stripe_refund_id": r.stripe_refund_id,
+                "amount": r.amount / 100,
+                "reason": r.reason,
+                "status": r.status,
+                "created_at": r.created_at,
+            }
+            for r in refunds
+        ],
+    }
 
 
 def _do_update_order_status(order_id: int, status_data: OrderStatusUpdate, db, admin_user):
     """Shared logic for PUT and PATCH on order status."""
     order = db.query(Order).options(
-        joinedload(Order.items)
+        joinedload(Order.items),
+        joinedload(Order.user),
     ).filter(Order.id == order_id).first()
     
     if not order:
@@ -467,6 +303,11 @@ def _do_update_order_status(order_id: int, status_data: OrderStatusUpdate, db, a
     
     if status_data.admin_notes:
         order.admin_notes = status_data.admin_notes
+
+    if status_data.status in ("cancelled", "refunded"):
+        revert_redemption(db, order)
+    elif old_status in ("cancelled", "refunded") and status_data.status in PAID_ORDER_STATUSES:
+        record_redemption(db, order)
 
     db.commit()
     db.refresh(order)
@@ -502,37 +343,16 @@ def _do_update_order_status(order_id: int, status_data: OrderStatusUpdate, db, a
             else:
                 logger.info("Order status update email sent: order=%s status=%s to=%s", order.order_number, status_data.status, customer_email)
 
-    return OrderResponse(
-        id=order.id,
-        order_number=order.order_number,
-        status=order.status,
-        subtotal=order.subtotal,
-        shipping_cost=order.shipping_cost,
-        discount=order.discount,
-        coupon_code=order.coupon_code,
-        tax=order.tax,
-        total=order.total,
-        shipping_address=order.shipping_address,
-        billing_address=order.billing_address,
-        payment_method=order.payment_method,
-        tracking_number=order.tracking_number,
-        customer_notes=order.customer_notes,
-        items=order.items,
-        item_count=order.item_count,
-        created_at=order.created_at,
-        paid_at=order.paid_at,
-        shipped_at=order.shipped_at,
-        delivered_at=order.delivered_at,
-    )
+    return _order_resp(order)
 
 
-@router.put("/orders/{order_id}/status", response_model=OrderResponse)
+@router.put("/orders/{order_id}/status", response_model=AdminOrderResponse)
 def update_order_status_put(order_id: int, status_data: OrderStatusUpdate, db: DbSession, admin_user: AdminUser):
     """Update order status (admin) — PUT."""
     return _do_update_order_status(order_id, status_data, db, admin_user)
 
 
-@router.patch("/orders/{order_id}/status", response_model=OrderResponse)
+@router.patch("/orders/{order_id}/status", response_model=AdminOrderResponse)
 def update_order_status_patch(order_id: int, status_data: OrderStatusUpdate, db: DbSession, admin_user: AdminUser):
     """Update order status (admin) — PATCH alias."""
     return _do_update_order_status(order_id, status_data, db, admin_user)
@@ -582,7 +402,7 @@ def get_order_shipment(order_id: int, db: DbSession, admin_user: AdminUser):
     }
 
 
-@router.patch("/orders/{order_id}/tracking", response_model=OrderResponse)
+@router.patch("/orders/{order_id}/tracking", response_model=AdminOrderResponse)
 def update_tracking_number(
     order_id: int,
     db: DbSession,
@@ -594,7 +414,9 @@ def update_tracking_number(
     Sends the shipping notification email to the customer the first time a
     tracking number is set (CORREOS_ENABLED=False manual workflow).
     """
-    order = db.query(Order).options(joinedload(Order.items)).filter(Order.id == order_id).first()
+    order = db.query(Order).options(
+        joinedload(Order.items), joinedload(Order.user)
+    ).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
 
@@ -623,17 +445,7 @@ def update_tracking_number(
             else:
                 logger.info("Shipping email sent: order=%s to=%s", order.order_number, customer_email)
 
-    return OrderResponse(
-        id=order.id, order_number=order.order_number, status=order.status,
-        subtotal=order.subtotal, shipping_cost=order.shipping_cost,
-        discount=order.discount, coupon_code=order.coupon_code,
-        tax=order.tax, total=order.total,
-        shipping_address=order.shipping_address, billing_address=order.billing_address,
-        payment_method=order.payment_method, tracking_number=order.tracking_number,
-        customer_notes=order.customer_notes, items=order.items,
-        item_count=order.item_count, created_at=order.created_at,
-        paid_at=order.paid_at, shipped_at=order.shipped_at, delivered_at=order.delivered_at,
-    )
+    return _order_resp(order)
 
 
 # ── Correos shipping: Labels, Tracking, Pickups ──────────────────────
@@ -762,22 +574,14 @@ def export_orders_csv(
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     status: Optional[str] = None,
+    search: Optional[str] = None,
+    coupon_code: Optional[str] = None,
+    user_id: Optional[int] = None,
 ):
-    """Export orders to CSV."""
-    query = db.query(Order).options(
-        joinedload(Order.items),
-        joinedload(Order.user)
-    )
-    
-    if status:
-        query = query.filter(Order.status == status)
-    if date_from:
-        query = query.filter(Order.created_at >= date_from)
-    if date_to:
-        query = query.filter(Order.created_at <= date_to)
-    
+    """Export orders to CSV (same filters as the list)."""
+    query = _filtered_orders_query(db, status, date_from, date_to, search, coupon_code, user_id)
     orders = query.order_by(Order.created_at.desc()).all()
-    
+
     # Create CSV
     output = io.StringIO()
     writer = csv.writer(output)
@@ -785,7 +589,7 @@ def export_orders_csv(
     # Header
     writer.writerow([
         "Nº Pedido", "Estado", "Email", "Cliente", "Dirección",
-        "Subtotal", "Envío", "Descuento", "IVA", "Total",
+        "Subtotal", "Envío", "Descuento", "Cupón", "IVA", "Total",
         "Método Pago", "Tracking", "Fecha Pedido", "Fecha Pago",
         "Fecha Envío", "Fecha Entrega", "Productos"
     ])
@@ -806,6 +610,7 @@ def export_orders_csv(
             float(order.subtotal),
             float(order.shipping_cost),
             float(order.discount),
+            order.coupon_code or "",
             float(order.tax),
             float(order.total),
             order.payment_method,
@@ -822,8 +627,8 @@ def export_orders_csv(
     filename = f"pedidos_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
     
     return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
+        iter(["\ufeff" + output.getvalue()]),  # BOM: Excel opens accents correctly
+        media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
@@ -1122,34 +927,62 @@ def list_reviews(
     status: str = Query("pending"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    product_id: Optional[int] = None,
+    rating: Optional[int] = Query(None, ge=1, le=5),
+    search: Optional[str] = None,
 ):
-    """List reviews filtered by moderation status (pending/approved/rejected)."""
-    if status not in _REVIEW_STATUSES:
-        raise HTTPException(status_code=422, detail=f"status debe ser uno de: {', '.join(_REVIEW_STATUSES)}")
+    """List reviews filtered by moderation status (pending/approved/rejected/all)."""
+    if status != "all" and status not in _REVIEW_STATUSES:
+        raise HTTPException(status_code=422, detail=f"status debe ser uno de: all, {', '.join(_REVIEW_STATUSES)}")
 
-    query = db.query(Review).options(
-        joinedload(Review.product),
-        joinedload(Review.user)
-    ).filter(Review.status == status).order_by(Review.created_at.desc())
+    query = db.query(Review).options(joinedload(Review.product), joinedload(Review.user))
+    if status != "all":
+        query = query.filter(Review.status == status)
+    if product_id:
+        query = query.filter(Review.product_id == product_id)
+    if rating:
+        query = query.filter(Review.rating == rating)
+    if search:
+        like = f"%{search.strip()}%"
+        query = query.outerjoin(User, Review.user_id == User.id).filter(
+            Review.title.ilike(like) | Review.comment.ilike(like) | User.email.ilike(like)
+        )
+    query = query.order_by(Review.created_at.desc())
 
-    total = query.count()
+    total = query.order_by(None).count()
     reviews = query.offset((page - 1) * page_size).limit(page_size).all()
 
     items = [
         {
             "id": r.id,
+            "product_id": r.product_id,
             "product_name": r.product.name if r.product else "N/A",
+            "user_id": r.user_id,
             "user_name": r.user.full_name if r.user else "Anónimo",
+            "user_email": r.user.email if r.user else None,
             "rating": r.rating,
             "title": r.title,
             "comment": r.comment,
             "is_verified_purchase": r.is_verified_purchase,
             "status": r.status,
+            "admin_response": r.admin_response,
             "created_at": r.created_at,
         }
         for r in reviews
     ]
     return PaginatedResponse.create(items, total, page, page_size)
+
+
+@router.put("/reviews/{review_id}/response", response_model=Message)
+def respond_review(review_id: int, data: dict, db: DbSession, admin_user: AdminUser):
+    """Save (or clear) the shop's public response to a review."""
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review no encontrada")
+    text = (data.get("admin_response") or "").strip()
+    review.admin_response = text[:2000] or None
+    db.commit()
+    return Message(message="Respuesta guardada")
 
 
 @router.put("/reviews/{review_id}/approve", response_model=Message)

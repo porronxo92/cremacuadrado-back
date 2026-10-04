@@ -42,6 +42,7 @@ class Order(Base):
     
     # Shipping
     tracking_number = Column(String(100), nullable=True)
+    shipping_status = Column(String(30), nullable=True, default="pending")  # added by 008_correos_shipments.sql
     shipped_at = Column(DateTime, nullable=True)
     delivered_at = Column(DateTime, nullable=True)
     
@@ -191,3 +192,25 @@ class Coupon(Base):
     
     def __repr__(self):
         return f"<Coupon {self.code}>"
+
+
+class CouponRedemption(Base):
+    """One row per paid order that used a coupon (who used which coupon, when, and how much)."""
+    __tablename__ = "coupon_redemptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    coupon_id = Column(Integer, ForeignKey("coupons.id", ondelete="SET NULL"), nullable=True, index=True)
+    coupon_code = Column(String(50), nullable=False, index=True)  # snapshot, survives coupon deletion
+    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, unique=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    email = Column(String(255), nullable=True)
+    discount_amount = Column(Numeric(10, 2), default=0, nullable=False)
+    reverted_at = Column(DateTime, nullable=True)  # order cancelled / fully refunded
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    coupon = relationship("Coupon")
+    order = relationship("Order")
+    user = relationship("User")
+
+    def __repr__(self):
+        return f"<CouponRedemption {self.coupon_code} order={self.order_id}>"

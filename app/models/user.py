@@ -29,6 +29,9 @@ class User(Base):
     # Login-attempt locking (brute-force protection)
     failed_login_attempts = Column(Integer, default=0, nullable=False)
     locked_until = Column(DateTime, nullable=True)
+    # Activity tracking (admin panel)
+    last_login_at = Column(DateTime, nullable=True)
+    login_count = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

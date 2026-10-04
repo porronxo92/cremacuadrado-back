@@ -3,7 +3,7 @@ Point-of-sale (B2B retail) lead model — leads captured from the /para-tiendas
 landing page form.
 """
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, Text, DateTime
 
 from app.models.database import Base
 
@@ -21,6 +21,7 @@ class PosLead(Base):
     phone = Column(String(30), nullable=False)
     stage = Column(String(100), nullable=False, default="Solicitud punto de venta recibida")
     status = Column(String(20), nullable=False, default="new")  # new | contacted | sample_sent | closed_won | closed_lost
+    notes = Column(Text, nullable=True)  # internal CRM notes (admin panel)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     def __repr__(self):

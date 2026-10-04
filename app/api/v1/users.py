@@ -17,6 +17,7 @@ from app.schemas.user import (
 from app.schemas.common import Message
 from app.utils.security import get_password_hash, verify_password
 from app.services.email import EmailService
+from app.services.user_accounts import anonymize_user
 
 logger = logging.getLogger("cremacuadrado.users")
 
@@ -94,16 +95,7 @@ async def delete_account(db: DbSession, current_user: CurrentUser):
     Anonymise and deactivate the current user's account (RGPD right to erasure).
     Orders are preserved for legal/fiscal records but PII is stripped.
     """
-    import uuid
-    anon_suffix = uuid.uuid4().hex[:8]
-    current_user.email = f"deleted_{anon_suffix}@cremacuadrado.invalid"
-    current_user.first_name = "Usuario"
-    current_user.last_name = "Eliminado"
-    current_user.phone = None
-    current_user.google_id = None
-    current_user.password_hash = None
-    current_user.is_active = False
-    current_user.token_version = getattr(current_user, "token_version", 0) + 1
+    anonymize_user(current_user)
     db.commit()
     return Message(message="Cuenta eliminada correctamente")
 

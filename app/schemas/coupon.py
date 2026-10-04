@@ -47,3 +47,25 @@ class CouponResponse(CouponBase):
     used_count: int
     is_valid: bool
     created_at: datetime
+
+
+class CouponAdminResponse(CouponResponse):
+    """Coupon with redemption analytics for the admin panel."""
+    redemptions: int = 0
+    unique_customers: int = 0
+    total_discount: Decimal = Decimal("0")
+    revenue: Decimal = Decimal("0")
+
+
+class CouponRedemptionItem(BaseModel):
+    id: int
+    order_id: int
+    order_number: Optional[str] = None
+    order_status: Optional[str] = None
+    order_total: Optional[Decimal] = None
+    user_id: Optional[int] = None
+    email: Optional[str] = None
+    customer_name: Optional[str] = None
+    discount_amount: Decimal
+    reverted_at: Optional[datetime] = None
+    created_at: datetime

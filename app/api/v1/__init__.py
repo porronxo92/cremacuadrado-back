@@ -12,6 +12,8 @@ from app.api.v1.admin import router as admin_router
 from app.api.v1.admin_blog import router as admin_blog_router
 from app.api.v1.admin_catalog import router as admin_catalog_router
 from app.api.v1.admin_content import router as admin_content_router
+from app.api.v1.admin_users import router as admin_users_router
+from app.api.v1.admin_insights import router as admin_insights_router
 from app.api.v1.webhooks import router as webhooks_router
 from app.api.v1.newsletter import router as newsletter_router
 from app.api.v1.leads import router as leads_router
@@ -31,6 +33,8 @@ router.include_router(admin_router, prefix="/admin", tags=["Admin"])
 router.include_router(admin_blog_router, prefix="/admin", tags=["Admin Blog"])
 router.include_router(admin_catalog_router, prefix="/admin", tags=["Admin Catalog"])
 router.include_router(admin_content_router, prefix="/admin", tags=["Admin Content"])
+router.include_router(admin_users_router, prefix="/admin", tags=["Admin Users"])
+router.include_router(admin_insights_router, prefix="/admin", tags=["Admin Insights"])
 router.include_router(webhooks_router, prefix="/webhooks", tags=["Webhooks"])
 router.include_router(newsletter_router, prefix="/newsletter", tags=["Newsletter"])
 router.include_router(leads_router, prefix="/leads", tags=["Leads B2B"])

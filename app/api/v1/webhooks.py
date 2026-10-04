@@ -18,6 +18,7 @@ from app.models.order import Order, OrderItem, Coupon
 from app.models.cart import Cart, CartItem
 from app.models.payment import PaymentIntent as PaymentIntentModel, StripeWebhookEvent, Refund
 from app.services import stripe_service
+from app.services.coupon_redemptions import record_redemption, revert_redemption
 from app.services.email import EmailService, send_order_confirmation, OrderEmailData
 from app.config import settings
 
@@ -227,6 +228,7 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
         coupon = db.query(Coupon).filter(Coupon.code == order.coupon_code).first()
         if coupon:
             coupon.used_count += 1
+        record_redemption(db, order)
 
     # Clear cart — primary: use cart_id stored in PI metadata.
     # Fallback: clear by user_id (covers orders created before metadata was saved).
@@ -422,6 +424,7 @@ def _handle_charge_refunded(db: Session, data: dict) -> None:
         )
         if is_full_refund:
             _restock_order_items(db, order)
+            revert_redemption(db, order)
 
         customer_email = order.customer_email
         if customer_email:

@@ -32,6 +32,12 @@ _LOCKOUT_MINUTES = 15
 router = APIRouter()
 
 
+def _record_login(user: User) -> None:
+    """Track last access for the admin panel. Caller commits."""
+    user.last_login_at = datetime.now(timezone.utc)
+    user.login_count = (user.login_count or 0) + 1
+
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
 async def register(request: Request, user_data: UserCreate, db: DbSession):
@@ -130,9 +136,10 @@ async def login(request: Request, credentials: UserLogin, db: DbSession):
             detail="Email o contraseña incorrectos"
         )
 
-    # Successful login — reset lockout counters
+    # Successful login — reset lockout counters and record activity
     user.failed_login_attempts = 0
     user.locked_until = None
+    _record_login(user)
     db.commit()
 
     logger.info("Login success: email=%s role=%s", user.email, user.role)
@@ -214,6 +221,9 @@ async def google_auth(request: Request, data: GoogleAuthRequest, db: DbSession):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cuenta desactivada"
         )
+
+    _record_login(user)
+    db.commit()
 
     token_version = getattr(user, "token_version", 0)
     access_token = create_access_token(user.id, token_version)
