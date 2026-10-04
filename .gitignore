@@ -57,3 +57,12 @@ build/
 static/images/products/*
 !static/images/products/.gitkeep
 prod.env
+
+.vercel
+
+# ── Scripts puntuales de mantenimiento (pueden contener credenciales) ──
+/fix_admin.py
+/fix_urls.py
+/migrate_images_to_blob.py
+/reupload_as_public.py
+/update_db_blob_urls.py
