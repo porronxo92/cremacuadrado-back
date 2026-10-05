@@ -9,6 +9,8 @@ from app.models.blog import BlogPost, BlogCategory
 from app.models.lead import NewsletterLead
 from app.models.pos_lead import PosLead
 from app.models.contact_lead import ContactLead
+from app.models.invoice import Invoice, InvoiceSequence
+from app.models.compliance import AdminAuditLog, ConsentRecord, PriceHistory, WithdrawalRequest
 
 __all__ = [
     "Base",
@@ -35,4 +37,10 @@ __all__ = [
     "NewsletterLead",
     "PosLead",
     "ContactLead",
+    "Invoice",
+    "InvoiceSequence",
+    "AdminAuditLog",
+    "ConsentRecord",
+    "PriceHistory",
+    "WithdrawalRequest",
 ]

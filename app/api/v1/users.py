@@ -5,7 +5,8 @@ import logging
 import re
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import DbSession, CurrentUser
@@ -17,6 +18,8 @@ from app.schemas.user import (
 from app.schemas.common import Message
 from app.utils.security import get_password_hash, verify_password
 from app.services.email import EmailService
+from app.services import consents
+from app.services.data_export import export_user_data
 from app.services.user_accounts import anonymize_user
 
 logger = logging.getLogger("cremacuadrado.users")
@@ -37,6 +40,7 @@ async def get_profile(current_user: CurrentUser):
 @router.put("/profile", response_model=UserResponse)
 async def update_profile(
     user_data: UserUpdate,
+    request: Request,
     db: DbSession,
     current_user: CurrentUser
 ):
@@ -48,9 +52,13 @@ async def update_profile(
         current_user.last_name = user_data.last_name
     if user_data.phone is not None:
         current_user.phone = user_data.phone
-    if user_data.marketing_opt_in is not None:
+    if user_data.marketing_opt_in is not None and user_data.marketing_opt_in != current_user.marketing_opt_in:
         current_user.marketing_opt_in = user_data.marketing_opt_in
-    
+        consents.record_consent(
+            db, email=current_user.email, purpose=consents.MARKETING,
+            granted=user_data.marketing_opt_in, source="profile", request=request, user_id=current_user.id,
+        )
+
     db.commit()
     db.refresh(current_user)
     
@@ -89,25 +97,49 @@ async def change_password(
     return Message(message="Contraseña actualizada correctamente")
 
 
+@router.get("/me/export")
+async def export_my_data(db: DbSession, current_user: CurrentUser):
+    """
+    Derecho de acceso y portabilidad (RGPD arts. 15 y 20): todos los datos
+    personales de la cuenta en un JSON descargable.
+    """
+    data = export_user_data(db, current_user)
+    logger.info("User data export: user=%s", current_user.id)
+    return JSONResponse(
+        content=data,
+        headers={
+            "Content-Disposition": 'attachment; filename="mis-datos-cremacuadrado.json"',
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
 @router.delete("/me", response_model=Message)
 async def delete_account(db: DbSession, current_user: CurrentUser):
     """
     Anonymise and deactivate the current user's account (RGPD right to erasure).
     Orders are preserved for legal/fiscal records but PII is stripped.
     """
-    anonymize_user(current_user)
+    anonymize_user(db, current_user)
     db.commit()
+    logger.info("User self-deleted (anonymised): user=%s", current_user.id)
     return Message(message="Cuenta eliminada correctamente")
 
 
 @router.put("/preferences", response_model=Message)
 async def update_preferences(
     marketing_opt_in: bool,
+    request: Request,
     db: DbSession,
     current_user: CurrentUser
 ):
-    """Update marketing preferences."""
-    current_user.marketing_opt_in = marketing_opt_in
+    """Update marketing preferences (queda registro del consentimiento o su retirada)."""
+    if marketing_opt_in != current_user.marketing_opt_in:
+        current_user.marketing_opt_in = marketing_opt_in
+        consents.record_consent(
+            db, email=current_user.email, purpose=consents.MARKETING,
+            granted=marketing_opt_in, source="profile", request=request, user_id=current_user.id,
+        )
     db.commit()
     
     return Message(message="Preferencias actualizadas")

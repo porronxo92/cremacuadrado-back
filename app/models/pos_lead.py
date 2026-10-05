@@ -22,6 +22,7 @@ class PosLead(Base):
     stage = Column(String(100), nullable=False, default="Solicitud punto de venta recibida")
     status = Column(String(20), nullable=False, default="new")  # new | contacted | sample_sent | closed_won | closed_lost
     notes = Column(Text, nullable=True)  # internal CRM notes (admin panel)
+    privacy_accepted_at = Column(DateTime, nullable=True)  # 020_consents.sql
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     def __repr__(self):

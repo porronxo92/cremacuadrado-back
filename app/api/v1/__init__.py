@@ -14,6 +14,10 @@ from app.api.v1.admin_catalog import router as admin_catalog_router
 from app.api.v1.admin_content import router as admin_content_router
 from app.api.v1.admin_users import router as admin_users_router
 from app.api.v1.admin_insights import router as admin_insights_router
+from app.api.v1.admin_invoices import router as admin_invoices_router
+from app.api.v1.admin_compliance import router as admin_compliance_router
+from app.api.v1.withdrawals import router as withdrawals_router
+from app.api.v1.maintenance import router as maintenance_router
 from app.api.v1.webhooks import router as webhooks_router
 from app.api.v1.newsletter import router as newsletter_router
 from app.api.v1.leads import router as leads_router
@@ -35,6 +39,10 @@ router.include_router(admin_catalog_router, prefix="/admin", tags=["Admin Catalo
 router.include_router(admin_content_router, prefix="/admin", tags=["Admin Content"])
 router.include_router(admin_users_router, prefix="/admin", tags=["Admin Users"])
 router.include_router(admin_insights_router, prefix="/admin", tags=["Admin Insights"])
+router.include_router(admin_invoices_router, prefix="/admin", tags=["Admin Invoices"])
+router.include_router(admin_compliance_router, prefix="/admin", tags=["Admin Compliance"])
+router.include_router(withdrawals_router, prefix="/withdrawals", tags=["Withdrawals"])
+router.include_router(maintenance_router, prefix="/maintenance", tags=["Maintenance"])
 router.include_router(webhooks_router, prefix="/webhooks", tags=["Webhooks"])
 router.include_router(newsletter_router, prefix="/newsletter", tags=["Newsletter"])
 router.include_router(leads_router, prefix="/leads", tags=["Leads B2B"])

@@ -26,6 +26,11 @@ class Order(Base):
     shipping_cost = Column(Numeric(10, 2), default=0, nullable=False)
     discount = Column(Numeric(10, 2), default=0, nullable=False)
     tax = Column(Numeric(10, 2), default=0, nullable=False)
+    tax_rate = Column(Numeric(5, 4), nullable=True)  # IVA aplicado (copia); added by 016_invoices.sql
+    # Aceptación expresa de las condiciones de venta (017_order_legal_acceptance.sql)
+    terms_version = Column(String(20), nullable=True)
+    terms_accepted_at = Column(DateTime, nullable=True)
+    acceptance_ip = Column(String(45), nullable=True)
     total = Column(Numeric(10, 2), nullable=False)
     
     # Coupon
@@ -62,6 +67,7 @@ class Order(Base):
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     payment_intents = relationship("PaymentIntent", back_populates="order")
     shipment = relationship("Shipment", back_populates="order", uselist=False, cascade="all, delete-orphan")
+    invoices = relationship("Invoice", viewonly=True, order_by="Invoice.id")
     
     @property
     def shipping_address(self) -> dict:

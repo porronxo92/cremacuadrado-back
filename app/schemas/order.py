@@ -51,6 +51,38 @@ class AddressInput(BaseModel):
     phone: str = Field(..., min_length=9, max_length=20)
 
 
+class BillingInput(BaseModel):
+    """Datos fiscales para factura completa (empresa / autónomo)."""
+    name: str = Field(..., min_length=2, max_length=200)  # razón social o nombre completo
+    nif: str = Field(..., min_length=8, max_length=15)
+    street: str = Field(..., min_length=1, max_length=255)
+    street_2: Optional[str] = Field(None, max_length=255)
+    city: str = Field(..., min_length=1, max_length=100)
+    province: str = Field(..., min_length=1, max_length=100)
+    postal_code: str = Field(..., min_length=4, max_length=10)
+    country: str = Field(default="España", max_length=100)
+
+    @field_validator("nif")
+    @classmethod
+    def _valid_nif(cls, value: str) -> str:
+        from app.utils.tax_id import is_valid_tax_id, normalize_tax_id
+        if not is_valid_tax_id(value):
+            raise ValueError("NIF/CIF/NIE no válido")
+        return normalize_tax_id(value)
+
+
+class CheckoutPreConfirm(BaseModel):
+    """
+    Último paso antes de cobrar: aceptación expresa de las condiciones de venta
+    y, opcionalmente, datos fiscales para factura con NIF.
+    """
+    order_number: str = Field(..., max_length=20)
+    payment_intent_id: str = Field(..., max_length=255)
+    accept_terms: bool = False
+    terms_version: Optional[str] = Field(None, max_length=20)
+    billing: Optional[BillingInput] = None  # None = factura simplificada sin NIF
+
+
 class CheckoutCreate(BaseModel):
     """Checkout creation schema."""
     shipping_address: AddressInput

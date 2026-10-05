@@ -17,7 +17,7 @@ logger = logging.getLogger("cremacuadrado.webhooks")
 from app.models.order import Order, OrderItem, Coupon
 from app.models.cart import Cart, CartItem
 from app.models.payment import PaymentIntent as PaymentIntentModel, StripeWebhookEvent, Refund
-from app.services import stripe_service
+from app.services import invoicing, stripe_service
 from app.services.coupon_redemptions import record_redemption, revert_redemption
 from app.services.email import EmailService, send_order_confirmation, OrderEmailData
 from app.config import settings
@@ -187,6 +187,8 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
         return
 
     logger.info("Order paid: order=%s pi=%s total=%s", order.order_number, stripe_pi_id, order.total)
+    if not order.terms_accepted_at:
+        logger.warning("Order paid without recorded terms acceptance: order=%s", order.order_number)
 
     # Mark order paid
     order.status = "paid"
@@ -253,6 +255,30 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
             cart.coupon_code = None
             logger.info("Cart cleared via user_id fallback: user_id=%s order=%s", order.user_id, order.order_number)
 
+    # Issue the invoice (correlative number + immutable snapshot) and commit it
+    # together with the paid status, stock and coupon changes, so a number is
+    # never handed out by an email and then rolled back. Runs in a SAVEPOINT:
+    # an invoicing failure must NOT leave a charged order unpaid — the invoice
+    # can be issued later on request or with scripts/backfill_invoices.py.
+    invoice = None
+    invoice_pdf = None
+    try:
+        with db.begin_nested():
+            invoice = invoicing.issue_invoice_for_order(db, order_with_items)
+    except Exception as exc:
+        invoice = None
+        logger.error("Invoice issuing failed: order=%s error=%s", order.order_number, exc, exc_info=True)
+    db.commit()
+
+    if invoice is not None:
+        try:
+            invoice_pdf = invoicing.store_pdf(db, invoice)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            invoice_pdf = None
+            logger.error("Invoice PDF failed: invoice=%s error=%s", invoice.invoice_number, exc, exc_info=True)
+
     # Generate Correos shipment (defensive: must NOT break payment processing).
     # While CORREOS_ENABLED=False, skip entirely — no API calls, no mock localizador.
     # The tracking number will be entered manually by an admin once the label is ready.
@@ -295,7 +321,11 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
             coupon_code=order.coupon_code,
             customer_notes=order.customer_notes,
             tracking_number=tracking_number,
+            invoice_number=invoice.invoice_number if invoice is not None and invoice_pdf else None,
+            invoice_pdf=invoice_pdf,
         ))
+        if sent and invoice is not None and invoice_pdf:
+            invoicing.mark_sent(invoice)
         if not sent:
             logger.error("Confirmation email failed: order=%s to=%s", order.order_number, customer_email)
     else:
@@ -415,6 +445,17 @@ def _handle_charge_refunded(db: Session, data: dict) -> None:
             reason=stripe_refund.get("reason"),
             status=stripe_refund["status"],
         ))
+
+    # Corrective invoice (serie R) for every completed refund not yet invoiced.
+    # Savepoint: an invoicing error must not block the refund bookkeeping.
+    db.flush()
+    for refund in db.query(Refund).filter(Refund.order_id == order.id, Refund.status == "succeeded").all():
+        try:
+            with db.begin_nested():
+                invoicing.issue_corrective_for_refund(db, order, refund)
+        except Exception as exc:
+            logger.error("Corrective invoice failed: order=%s refund=%s error=%s",
+                         order.order_number, refund.stripe_refund_id, exc, exc_info=True)
 
     if order.status != "refunded":
         order.status = "refunded" if is_full_refund else "partially_refunded"

@@ -46,9 +46,33 @@ class Settings(BaseSettings):
     SHIPPING_COST: float = 4.95
     FREE_SHIPPING_THRESHOLD: float = 48.0
     
-    # Tax
-    TAX_RATE: float = 0.21  # 21% IVA
+    # Tax — IVA reducido de alimentación (10 %). El envío, como prestación accesoria,
+    # tributa al mismo tipo que el producto. El tipo aplicado se guarda en cada
+    # pedido (orders.tax_rate) y en cada factura, así que cambiarlo aquí no altera
+    # facturas ya emitidas.
+    TAX_RATE: float = 0.10
     
+    # Legal — versión vigente de los textos. Se guarda con cada aceptación /
+    # consentimiento; súbela cuando cambie el texto publicado en el frontend.
+    TERMS_VERSION: str = "2026-10"     # condiciones generales de venta
+    PRIVACY_VERSION: str = "2026-10"   # política de privacidad
+
+    # Envíos: solo península (las CGV lo indican). Prefijos de CP excluidos:
+    # 07 Baleares, 35/38 Canarias, 51 Ceuta, 52 Melilla.
+    SHIPPING_EXCLUDED_POSTCODE_PREFIXES: list[str] = ["07", "35", "38", "51", "52"]
+    SHIPPING_ALLOWED_COUNTRIES: list[str] = ["ES", "España", "Espana", "Spain"]
+
+    # Conservación de datos (días) — ver app/services/retention.py
+    RETENTION_GUEST_CART_DAYS: int = 30
+    RETENTION_UNCONFIRMED_LEAD_DAYS: int = 30       # newsletter sin confirmar (doble opt-in)
+    RETENTION_LEAD_DAYS: int = 730                  # leads B2B / newsletter sin conversión
+    RETENTION_CONTACT_DAYS: int = 365
+    RETENTION_WEBHOOK_EVENT_DAYS: int = 365
+    RETENTION_AUDIT_LOG_DAYS: int = 730
+
+    # Vercel Cron — Vercel envía "Authorization: Bearer <CRON_SECRET>"
+    CRON_SECRET: str = ""
+
     # Pagination
     DEFAULT_PAGE_SIZE: int = 12
     MAX_PAGE_SIZE: int = 100
@@ -110,6 +134,12 @@ class Settings(BaseSettings):
 
     # Vercel Blob — public store for product/blog images
     BLOB_PUBLIC_READ_WRITE_TOKEN: str = ""
+
+    # Vercel Blob — PRIVATE store "cremacuadrado-invoices" (facturas en PDF).
+    # Nunca se exponen URLs: el backend descarga el PDF con el token y lo sirve.
+    BLOB_INVOICE_READ_WRITE_TOKEN: str = ""
+    BLOB_INVOICE_STORE_ID: str = ""  # opcional si el token ya incluye el store id
+    BLOB_INVOICE_WEBHOOK_PUBLIC_KEY: str = ""  # reservado (webhooks del store), sin uso
 
     # Security headers
     SECURE_HEADERS: bool = True  # Set False only for local dev if needed

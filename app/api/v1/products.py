@@ -17,6 +17,7 @@ from app.schemas.product import (
 from app.schemas.common import PaginatedResponse
 from app.config import settings
 from app.utils.url import normalize_image_url
+from app.services.price_history import prior_lowest_for
 
 router = APIRouter()
 
@@ -28,7 +29,9 @@ def _variant_response(v: ProductVariant) -> ProductVariantResponse:
         format=v.format,
         weight_grams=v.weight_grams,
         price=v.price,
-        compare_price=v.compare_price,
+        # Omnibus: el "precio anterior" público es SIEMPRE el más bajo de los 30
+        # días previos a la rebaja (price_history), nunca el compare_price manual.
+        compare_price=prior_lowest_for(v),
         stock=v.stock,
         is_active=v.is_active,
         is_in_stock=v.is_in_stock,

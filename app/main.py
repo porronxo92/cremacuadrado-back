@@ -26,10 +26,12 @@ from app.config import settings
 from app.logging_config import setup_logging, request_id_ctx
 from app.limiter import limiter
 from app.services import blob_service
+from app.services.audit import audit_admin_requests
 
 setup_logging(debug=settings.DEBUG)
 logger = logging.getLogger("cremacuadrado")
 from app.api.v1 import router as api_v1_router
+import app.services.price_history  # noqa: F401,E402 — registra el historial de precios (Omnibus)
 from app.models.database import engine, Base
 from app.sqladmin_config import (
     AdminAuth,
@@ -38,7 +40,7 @@ from app.sqladmin_config import (
     ProductImageAdmin, ProductNutritionAdmin, ReviewAdmin,
     CartAdmin, CartItemAdmin,
     OrderAdmin, OrderItemAdmin, CouponAdmin,
-    PaymentIntentAdmin, StripeWebhookEventAdmin, RefundAdmin,
+    PaymentIntentAdmin, StripeWebhookEventAdmin, RefundAdmin, InvoiceAdmin,
     BlogCategoryAdmin, BlogPostAdmin,
     PointOfSaleAdmin,
 )
@@ -143,6 +145,7 @@ _sqladmin.add_view(CouponAdmin)
 _sqladmin.add_view(PaymentIntentAdmin)
 _sqladmin.add_view(StripeWebhookEventAdmin)
 _sqladmin.add_view(RefundAdmin)
+_sqladmin.add_view(InvoiceAdmin)
 _sqladmin.add_view(BlogCategoryAdmin)
 _sqladmin.add_view(BlogPostAdmin)
 _sqladmin.add_view(PointOfSaleAdmin)
@@ -277,10 +280,28 @@ async def cart_session_middleware(request: Request, call_next):
     return response
 
 
+# CSP: el API solo devuelve JSON/PDF, así que no necesita cargar nada. El panel
+# SQLAdmin (/admin) sirve HTML con sus propios estáticos (y CDN de jsDelivr).
+_API_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+_ADMIN_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+    "font-src 'self' data: https://cdn.jsdelivr.net https://fonts.gstatic.com; "
+    "img-src 'self' data: https:; connect-src 'self'; "
+    "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+)
+
+
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     """Add security headers to every response."""
     response = await call_next(request)
+    path = request.url.path
+    if "content-security-policy" not in response.headers and not path.startswith("/static"):
+        response.headers["Content-Security-Policy"] = (
+            _ADMIN_CSP if path.startswith("/admin") else _API_CSP
+        )
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
@@ -289,6 +310,9 @@ async def add_security_headers(request: Request, call_next):
     if not settings.DEBUG:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
     return response
+
+# Registro de accesos al API de administración (RGPD art. 32)
+app.middleware("http")(audit_admin_requests)
 
 # Include API routers
 app.include_router(api_v1_router, prefix="/api/v1")
@@ -317,7 +341,7 @@ async def admin_upload(
     dest_path: str = Form("misc"),
 ):
     """Upload an image from the SQLAdmin panel (session-authenticated) to Vercel Blob."""
-    if request.session.get("token") != "authenticated":
+    if not await _admin_auth.authenticate(request):
         return JSONResponse({"error": "No autorizado"}, status_code=403)
 
     ext = os.path.splitext(file.filename or "")[1].lower()

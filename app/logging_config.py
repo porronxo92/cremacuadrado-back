@@ -9,6 +9,7 @@ so all lines produced during a single HTTP request share the same ID.
 """
 import json
 import logging
+import re
 import sys
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -25,6 +26,29 @@ class _RequestIdFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         record.request_id = request_id_ctx.get("-")
+        return True
+
+
+_EMAIL_RE = re.compile(r"([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})")
+
+
+def mask_emails(text: str) -> str:
+    """ana.perez@gmail.com → a***@gmail.com (minimización de datos en logs)."""
+    return _EMAIL_RE.sub(r"\1***@\2", text)
+
+
+class _PiiMaskFilter(logging.Filter):
+    """Enmascara emails en todos los mensajes de log antes de escribirlos."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True
+        masked = mask_emails(message)
+        if masked != message:
+            record.msg = masked
+            record.args = None
         return True
 
 
@@ -96,6 +120,7 @@ def setup_logging(debug: bool = False) -> None:
     handler = logging.StreamHandler(sys.stdout)
     handler._cremacuadrado = True  # marker so the guard above can identify our handler
     handler.addFilter(_RequestIdFilter())
+    handler.addFilter(_PiiMaskFilter())
     handler.setFormatter(_DevFormatter() if debug else _JsonFormatter())
 
     root.handlers.clear()
@@ -115,4 +140,3 @@ def setup_logging(debug: bool = False) -> None:
     logging.getLogger("apscheduler.executors").setLevel(logging.INFO if debug else logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.INFO if debug else logging.WARNING)
     logging.getLogger("stripe").setLevel(logging.INFO if debug else logging.WARNING)
-    logging.getLogger("passlib").setLevel(logging.WARNING)  # bcrypt internals — never useful

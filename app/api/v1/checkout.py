@@ -9,7 +9,7 @@ from datetime import datetime
 
 import stripe as stripe_lib
 
-from fastapi import APIRouter, Depends, HTTPException, Cookie, Header, status
+from fastapi import APIRouter, Depends, HTTPException, Cookie, Header, Request, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import DbSession, CurrentUserOptional
@@ -19,10 +19,11 @@ from app.models.order import Order, OrderItem, Coupon
 from app.models.payment import PaymentIntent as PaymentIntentModel
 from app.models.user import User, Address
 from app.schemas.order import (
-    CheckoutCreate, CheckoutValidation, PaymentIntentResponse,
+    CheckoutPreConfirm, CheckoutCreate, CheckoutValidation, PaymentIntentResponse,
     CompleteCheckout, OrderResponse, ShippingCostResponse
 )
-from app.services import stripe_service
+from app.schemas.common import Message
+from app.services import consents, stripe_service
 from app.config import settings
 from app.utils.url import normalize_image_url
 
@@ -139,6 +140,13 @@ async def validate_checkout(
     # Validate guest email
     if not current_user and not checkout_data.guest_email:
         errors.append("Se requiere email para compras como invitado")
+
+    # Ámbito de envío de las condiciones de venta: España peninsular
+    address = checkout_data.shipping_address
+    if address.country not in settings.SHIPPING_ALLOWED_COUNTRIES:
+        errors.append("De momento solo enviamos a España peninsular")
+    elif address.postal_code.strip()[:2] in settings.SHIPPING_EXCLUDED_POSTCODE_PREFIXES:
+        errors.append("De momento no enviamos a Baleares, Canarias, Ceuta ni Melilla. Escríbenos a info@cremacuadrado.com")
     
     # Calculate totals
     subtotal = cart.subtotal
@@ -228,6 +236,7 @@ async def create_payment_intent(
         shipping_cost=validation.shipping_cost,
         discount=validation.discount,
         tax=validation.tax,
+        tax_rate=Decimal(str(settings.TAX_RATE)),
         total=validation.total,
         coupon_code=checkout_data.coupon_code or cart.coupon_code,
         guest_email=checkout_data.guest_email if not current_user else None,
@@ -314,6 +323,38 @@ async def create_payment_intent(
         currency=settings.STRIPE_CURRENCY,
         order_number=order.order_number,
     )
+
+
+@router.post("/pre-confirm", response_model=Message)
+def pre_confirm_order(data: CheckoutPreConfirm, request: Request, db: DbSession):
+    """
+    Se llama justo antes de confirmar el pago en Stripe. Registra la aceptación
+    expresa de las condiciones de venta (versión, fecha e IP: TRLGDCU art. 98)
+    y guarda los datos fiscales si se pide factura con NIF.
+    Autorización: el payment_intent_id del pedido, que solo conoce quien lo creó.
+    """
+    if not data.accept_terms:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Debes aceptar las condiciones generales de venta",
+        )
+    order = db.query(Order).filter(Order.order_number == data.order_number).first()
+    if not order or order.payment_intent_id != data.payment_intent_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
+    if order.status != "pending_payment":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El pedido ya está pagado; los datos de facturación no se pueden cambiar",
+        )
+    order.billing_address = data.billing.model_dump() if data.billing else None
+    order.terms_version = settings.TERMS_VERSION
+    order.terms_accepted_at = datetime.utcnow()
+    order.acceptance_ip = consents.client_ip(request)
+    if data.terms_version and data.terms_version != settings.TERMS_VERSION:
+        logger.warning("Terms version mismatch: order=%s client=%s server=%s",
+                       order.order_number, data.terms_version, settings.TERMS_VERSION)
+    db.commit()
+    return Message(message="Pedido listo para el pago")
 
 
 @router.post("/complete", response_model=OrderResponse)
@@ -461,6 +502,7 @@ async def get_order_confirmation(
                 )
                 from app.api.v1.webhooks import handle_payment_succeeded
                 handle_payment_succeeded(db, order.payment_intent_id)
+                db.commit()  # the webhook dispatcher commits for itself; this path must too
                 db.refresh(order)
         except Exception as exc:
             logger.warning(

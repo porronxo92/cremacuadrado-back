@@ -5,7 +5,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request, status
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError as JWTError
 
 from app.api.deps import DbSession, CurrentUser
 from app.limiter import limiter
@@ -23,6 +24,7 @@ from app.utils.security import (
     create_access_token, create_refresh_token,
     generate_reset_token
 )
+from app.services import consents
 from app.services.email import EmailService
 from app.config import settings
 
@@ -42,6 +44,11 @@ def _record_login(user: User) -> None:
 @limiter.limit("5/minute")
 async def register(request: Request, user_data: UserCreate, db: DbSession):
     """Register a new user account."""
+    if not user_data.accept_terms:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Debes aceptar las condiciones de uso y la política de privacidad",
+        )
     existing_user = db.query(User).filter(User.email == user_data.email.lower()).first()
     if existing_user:
         logger.warning("Register rejected — email already exists: %s", user_data.email.lower())
@@ -57,9 +64,16 @@ async def register(request: Request, user_data: UserCreate, db: DbSession):
         last_name=user_data.last_name,
         phone=user_data.phone,
         role="customer",
+        marketing_opt_in=user_data.marketing_opt_in,
     )
 
     db.add(user)
+    db.flush()
+    consents.record_consent(db, email=user.email, purpose=consents.TERMS_REGISTER, granted=True,
+                            source="register", request=request, user_id=user.id)
+    if user_data.marketing_opt_in:
+        consents.record_consent(db, email=user.email, purpose=consents.MARKETING, granted=True,
+                                source="register", request=request, user_id=user.id)
     db.commit()
     db.refresh(user)
 

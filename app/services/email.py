@@ -10,6 +10,7 @@ Outgoing mail routes through one of two mailboxes (see app/config.py):
 """
 import logging
 import smtplib
+from html import escape
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -217,7 +218,15 @@ def _send_with_attachment(
 # Shared HTML layout
 # ---------------------------------------------------------------------------
 
-def _wrap_layout(inner_html: str) -> str:
+def _wrap_layout(inner_html: str, unsubscribe_url: Optional[str] = None) -> str:
+    unsubscribe = ""
+    if unsubscribe_url:
+        unsubscribe = (
+            '<p style="margin:12px 0 0;font-family:Arial,sans-serif;font-size:11px;color:#6B6456;">'
+            "Recibes este email porque te suscribiste a las novedades de CremaCuadrado. "
+            f'<a href="{unsubscribe_url}" style="color:#E6C15A;">Darte de baja</a>'
+            "</p>"
+        )
     return f"""<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -259,6 +268,7 @@ def _wrap_layout(inner_html: str) -> str:
                 &nbsp;·&nbsp;
                 <a href="{settings.SITE_URL}/devoluciones" style="color:#6B6456;text-decoration:none;">Devoluciones</a>
               </p>
+              {unsubscribe}
             </td>
           </tr>
 
@@ -303,6 +313,8 @@ class OrderEmailData:
         coupon_code: Optional[str] = None,
         customer_notes: Optional[str] = None,
         tracking_number: Optional[str] = None,
+        invoice_number: Optional[str] = None,
+        invoice_pdf: Optional[bytes] = None,
     ):
         self.to_email = to_email
         self.customer_name = customer_name
@@ -317,6 +329,8 @@ class OrderEmailData:
         self.coupon_code = coupon_code
         self.customer_notes = customer_notes
         self.tracking_number = tracking_number
+        self.invoice_number = invoice_number
+        self.invoice_pdf = invoice_pdf
 
 
 def send_order_confirmation(data: OrderEmailData) -> bool:
@@ -401,6 +415,25 @@ def send_order_confirmation(data: OrderEmailData) -> bool:
           <p style="margin:0;font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;">{data.customer_notes}</p>
         </div>"""
 
+    legal_note = f"""
+      <div style="margin-top:24px;padding:16px;background-color:#F4F1E9;border-radius:6px;">
+        <p style="margin:0 0 6px;font-family:Arial,sans-serif;font-size:12px;font-weight:600;color:#1C1A14;">Información legal de tu compra</p>
+        <p style="margin:0;font-family:Arial,sans-serif;font-size:12px;color:#6B6456;line-height:1.6;">
+          Tienes <strong>14 días naturales desde la recepción</strong> para desistir de la compra sin indicar
+          el motivo, salvo para productos alimentarios desprecintados tras la entrega (art. 103 TRLGDCU).
+          Puedes ejercerlo desde <a href="{settings.SITE_URL}/desistimiento" style="color:#7B1716;">{settings.SITE_URL}/desistimiento</a>.
+          Consulta las <a href="{settings.SITE_URL}/condiciones-venta" style="color:#7B1716;">condiciones generales de venta</a>
+          (versión {settings.TERMS_VERSION}) aceptadas en este pedido.
+        </p>
+      </div>"""
+
+    invoice_note = ""
+    if data.invoice_pdf and data.invoice_number:
+        invoice_note = f"""
+      <p style="margin:24px 0 0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
+        Adjuntamos la factura <strong>{data.invoice_number}</strong> de tu compra.
+      </p>"""
+
     inner = f"""
       <!-- Greeting -->
       <h2 style="margin:0 0 6px;font-family:Arial,sans-serif;font-size:22px;font-weight:700;color:#7B1716;">
@@ -479,6 +512,10 @@ def send_order_confirmation(data: OrderEmailData) -> bool:
         </p>
       </div>
 
+      {invoice_note}
+
+      {legal_note}
+
       {_btn(order_url, "Ver mis pedidos")}
     """
 
@@ -491,6 +528,16 @@ def send_order_confirmation(data: OrderEmailData) -> bool:
         f"Puedes ver los detalles en: {order_url}"
     )
 
+    if data.invoice_pdf and data.invoice_number:
+        return _send_with_attachment(
+            to_email=data.to_email,
+            subject=subject,
+            html=html,
+            attachment_bytes=data.invoice_pdf,
+            attachment_filename=f"Factura_{data.invoice_number}.pdf",
+            text=text,
+            mailbox="pedidos",
+        )
     return _send(data.to_email, subject, html, text, mailbox="pedidos")
 
 
@@ -516,12 +563,31 @@ class EmailService:
         return _send(to_email, "¡Bienvenido a CremaCuadrado!", _wrap_layout(inner))
 
     @classmethod
-    def send_newsletter_welcome_email(cls, to_email: str, coupon_code: str) -> bool:
-        """Send the welcome coupon to a lead captured via the homepage popup."""
+    def send_newsletter_confirmation_email(cls, to_email: str, confirm_url: str) -> bool:
+        """Doble opt-in: el alta solo es efectiva cuando la persona confirma su email."""
+        inner = f"""
+          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Confirma tu suscripción</h2>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+            Has pedido recibir recetas, novedades y ofertas de CremaCuadrado. Pulsa el botón para confirmarlo
+            y te enviaremos tu código de <strong>10% de descuento</strong> para el primer pedido.
+          </p>
+          {_btn(confirm_url, "Confirmar suscripción")}
+          <p style="margin-top:24px;font-family:Arial,sans-serif;font-size:12px;color:#6B6456;line-height:1.6;">
+            Si no has sido tú, ignora este email: no te escribiremos más.
+            Responsable: CREMACUADRADO SL. Finalidad: envío de comunicaciones comerciales.
+            Puedes darte de baja en cualquier momento. Más información en
+            <a href="{settings.SITE_URL}/privacidad" style="color:#7B1716;">{settings.SITE_URL}/privacidad</a>.
+          </p>
+        """
+        return _send(to_email, "Confirma tu suscripción · CremaCuadrado", _wrap_layout(inner))
+
+    @classmethod
+    def send_newsletter_welcome_email(cls, to_email: str, coupon_code: str, unsubscribe_url: Optional[str] = None) -> bool:
+        """Cupón de bienvenida tras confirmar la suscripción (doble opt-in)."""
         inner = f"""
           <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">¡Bienvenido/a a CremaCuadrado!</h2>
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-            Gracias por unirte. Aquí tienes tu código para disfrutar de un <strong>10% de descuento en tu primer pedido</strong>.
+            Gracias por confirmar tu suscripción. Aquí tienes tu código para disfrutar de un <strong>10% de descuento en tu primer pedido</strong>.
           </p>
           <div style="margin:24px 0;padding:20px;background-color:#F4F1E9;border-radius:6px;text-align:center;border:1px dashed #7B1716;">
             <p style="margin:0 0 4px;font-family:Arial,sans-serif;font-size:12px;color:#6B6456;text-transform:uppercase;letter-spacing:1px;">Tu código de descuento</p>
@@ -529,10 +595,52 @@ class EmailService:
           </div>
           {_btn(settings.SITE_URL + "/tienda", "Ir a la tienda")}
           <p style="margin-top:24px;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
-            Aplícalo en el carrito antes de pagar. Válido para tu primer pedido.
+            Aplícalo en el carrito antes de pagar. Válido para tu primer pedido con una cuenta registrada.
           </p>
         """
-        return _send(to_email, "Tu 10% de descuento te espera · CremaCuadrado", _wrap_layout(inner))
+        return _send(to_email, "Tu 10% de descuento te espera · CremaCuadrado", _wrap_layout(inner, unsubscribe_url))
+
+    @classmethod
+    def send_withdrawal_ack(cls, to_email: str, full_name: str, order_number: str,
+                            request_id: int, items_text: Optional[str], requested_at: datetime) -> bool:
+        """Acuse de recibo del desistimiento en soporte duradero (TRLGDCU art. 106.3)."""
+        items = escape(items_text or "Pedido completo")
+        full_name = escape(full_name)
+        inner = f"""
+          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Hemos recibido tu desistimiento</h2>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+            Hola {full_name}, confirmamos la recepción de tu solicitud de desistimiento.
+          </p>
+          <table style="width:100%;font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;margin:16px 0;">
+            <tr><td style="padding:4px 0;color:#6B6456;">Nº de solicitud</td><td style="padding:4px 0;"><strong>D-{request_id:06d}</strong></td></tr>
+            <tr><td style="padding:4px 0;color:#6B6456;">Pedido</td><td style="padding:4px 0;">{order_number}</td></tr>
+            <tr><td style="padding:4px 0;color:#6B6456;">Productos</td><td style="padding:4px 0;">{items}</td></tr>
+            <tr><td style="padding:4px 0;color:#6B6456;">Fecha de la solicitud</td><td style="padding:4px 0;">{requested_at.strftime("%d/%m/%Y %H:%M")} (UTC)</td></tr>
+          </table>
+          <p style="font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;line-height:1.6;">
+            En breve te escribiremos con las instrucciones para devolver los productos. Te reembolsaremos
+            todos los pagos recibidos, incluidos los gastos de envío ordinarios, en un plazo máximo de
+            14 días naturales desde hoy, por el mismo medio de pago. Podemos retener el reembolso hasta
+            recibir los productos o hasta que acredites su devolución.
+          </p>
+        """
+        return _send(to_email, f"Desistimiento recibido · pedido {order_number}", _wrap_layout(inner), mailbox="pedidos")
+
+    @classmethod
+    def send_admin_withdrawal(cls, order_number: str, email: str, full_name: str,
+                              items_text: Optional[str], reason: Optional[str], within_term: bool) -> bool:
+        inner = f"""
+          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:20px;color:#7B1716;">Nueva solicitud de desistimiento</h2>
+          <p style="font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;line-height:1.7;">
+            <strong>Pedido:</strong> {order_number}<br>
+            <strong>Cliente:</strong> {escape(full_name)} ({escape(email)})<br>
+            <strong>Productos:</strong> {escape(items_text or "Pedido completo")}<br>
+            <strong>Motivo:</strong> {escape(reason or "—")}<br>
+            <strong>Dentro de plazo (14 días):</strong> {"Sí" if within_term else "NO — revisar"}
+          </p>
+          {_btn(settings.SITE_URL + "/admin/desistimientos", "Ver en el panel")}
+        """
+        return _send(settings.ADMIN_EMAIL, f"Desistimiento · pedido {order_number}", _wrap_layout(inner), mailbox="pedidos")
 
     @classmethod
     def send_password_reset_email(cls, to_email: str, reset_token: str) -> bool:
@@ -861,42 +969,41 @@ def send_invoice_email(
     to_email: str,
     first_name: str,
     order_number: str,
+    invoice_number: str,
     pdf_bytes: bytes,
+    corrective: bool = False,
 ) -> bool:
-    """Send invoice PDF as email attachment to the customer."""
-    from app.services.invoice import _invoice_number
-    invoice_number = _invoice_number(order_number)
-    pdf_filename = f"Factura_{invoice_number}.pdf"
-
+    """Send an issued invoice PDF (the stored one) as an email attachment."""
+    from app.services.company import COMPANY
+    kind = "factura rectificativa" if corrective else "factura"
     inner = f"""
       <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">
-        Tu factura está lista
+        Tu {kind}
       </h2>
       <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-        Hola <strong>{first_name}</strong>, adjuntamos la factura correspondiente al pedido
-        <strong>{order_number}</strong>.
+        Hola <strong>{first_name}</strong>, adjuntamos la {kind} <strong>{invoice_number}</strong>
+        correspondiente al pedido <strong>{order_number}</strong>.
       </p>
       <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-        El número de factura es <strong>{invoice_number}</strong>.
         Puedes guardar el PDF adjunto para tus registros contables.
       </p>
       <div style="background:#EDE9DF;border-radius:8px;padding:16px 20px;margin:20px 0;">
         <p style="margin:0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
-          <strong>Cremacuadrado SL</strong> · CIF B56673700<br>
-          Camino del arca 18 · 13005 Ciudad Real<br>
-          Admin@cremacuadrado.com · 623 286 353
+          <strong>{COMPANY["name"]}</strong> · NIF {COMPANY["nif"]}<br>
+          {COMPANY["address"]} · {COMPANY["postal_code"]} {COMPANY["city"]}<br>
+          {COMPANY["email"]} · {COMPANY["phone"]}
         </p>
       </div>
       <p style="font-family:Arial,sans-serif;font-size:13px;color:#6B6456;margin-top:16px;">
         Si tienes alguna duda sobre la factura, escríbenos a
-        <a href="mailto:Admin@cremacuadrado.com" style="color:#7B1716;">Admin@cremacuadrado.com</a>.
+        <a href="mailto:{COMPANY["email"]}" style="color:#7B1716;">{COMPANY["email"]}</a>.
       </p>
     """
     return _send_with_attachment(
         to_email=to_email,
-        subject=f"Factura {invoice_number} · CremaCuadrado",
+        subject=f"{kind.capitalize()} {invoice_number} · CremaCuadrado",
         html=_wrap_layout(inner),
         attachment_bytes=pdf_bytes,
-        attachment_filename=pdf_filename,
+        attachment_filename=f"Factura_{invoice_number}.pdf",
         mailbox="pedidos",
     )

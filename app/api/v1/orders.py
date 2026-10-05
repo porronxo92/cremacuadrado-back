@@ -1,18 +1,24 @@
 """
 Orders API endpoints.
 """
+import io
 import logging
 from typing import List
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import joinedload
 
 from app.api.deps import DbSession, CurrentUser
+from app.models.invoice import Invoice
 from app.models.order import Order, OrderItem
 from app.models.cart import Cart, CartItem
 from app.models.product import Product
 from app.schemas.order import OrderResponse, OrderListResponse, OrderItemResponse
 from app.schemas.common import Message, PaginatedResponse
+from app.schemas.invoice import InvoiceSummary
+from app.services import invoicing
+from app.services.email import send_invoice_email
 from app.utils.url import normalize_image_url
 from app.config import settings
 
@@ -227,53 +233,102 @@ def cancel_order(order_number: str, db: DbSession, current_user: CurrentUser):
     return Message(message="Pedido cancelado correctamente")
 
 
-_INVOICEABLE_STATUSES = {"paid", "processing", "shipped", "delivered"}
-
-
-@router.post("/{order_number}/request-invoice", response_model=Message)
-def request_invoice(
-    order_number: str,
-    db: DbSession,
-    current_user: CurrentUser,
-    background_tasks: BackgroundTasks,
-):
-    """Generate a PDF invoice and send it by email to the authenticated user."""
-    order = db.query(Order).options(
-        joinedload(Order.items)
-    ).filter(
+def _get_owned_order(db, order_number: str, user_id: int) -> Order:
+    order = db.query(Order).options(joinedload(Order.items)).filter(
         Order.order_number == order_number,
-        Order.user_id == current_user.id,
+        Order.user_id == user_id,
     ).first()
-
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
+    return order
 
-    if order.status not in _INVOICEABLE_STATUSES:
+
+def _ensure_primary_invoice(db, order: Order) -> Invoice:
+    """Factura del pedido; la emite si no existe (pedidos anteriores a la facturación)."""
+    invoice = invoicing.primary_invoice(db, order.id)
+    if invoice:
+        return invoice
+    if order.status not in invoicing.INVOICEABLE_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="La factura solo está disponible para pedidos pagados",
         )
+    invoice = invoicing.issue_invoice_for_order(db, order)
+    db.commit()
+    return invoice
 
-    customer_name = f"{current_user.first_name} {current_user.last_name}".strip()
+
+def _pdf_response(pdf_bytes: bytes, filename: str) -> StreamingResponse:
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+@router.get("/{order_number}/invoices", response_model=List[InvoiceSummary])
+def list_order_invoices(order_number: str, db: DbSession, current_user: CurrentUser):
+    """Facturas (ordinaria y rectificativas) de un pedido del usuario."""
+    order = _get_owned_order(db, order_number, current_user.id)
+    invoices = (
+        db.query(Invoice)
+        .filter(Invoice.order_id == order.id)
+        .order_by(Invoice.issued_at, Invoice.id)
+        .all()
+    )
+    return [InvoiceSummary.model_validate(inv) for inv in invoices]
+
+
+@router.get("/{order_number}/invoice")
+def download_invoice(
+    order_number: str,
+    db: DbSession,
+    current_user: CurrentUser,
+    number: str | None = Query(None, description="Número de factura; por defecto la del pedido"),
+):
+    """Descarga el PDF guardado de la factura (o de una rectificativa con ?number=)."""
+    order = _get_owned_order(db, order_number, current_user.id)
+    if number:
+        invoice = db.query(Invoice).filter(
+            Invoice.order_id == order.id, Invoice.invoice_number == number,
+        ).first()
+        if not invoice:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Factura no encontrada")
+    else:
+        invoice = _ensure_primary_invoice(db, order)
+
+    pdf_bytes = invoicing.get_pdf(db, invoice)
+    db.commit()
+    return _pdf_response(pdf_bytes, invoice.pdf_filename)
+
+
+@router.post("/{order_number}/request-invoice", response_model=Message)
+def request_invoice(order_number: str, db: DbSession, current_user: CurrentUser):
+    """Reenvía por email la factura YA EMITIDA del pedido (el mismo PDF guardado)."""
+    order = _get_owned_order(db, order_number, current_user.id)
+    invoice = _ensure_primary_invoice(db, order)
+
+    pdf_bytes = invoicing.get_pdf(db, invoice)
     customer_email = current_user.email
+    sent = send_invoice_email(
+        to_email=customer_email,
+        first_name=current_user.first_name or "",
+        order_number=order.order_number,
+        invoice_number=invoice.invoice_number,
+        pdf_bytes=pdf_bytes,
+    )
+    if not sent:
+        db.commit()  # keep pdf_status/blob updates even if the email failed
+        logger.error("Invoice email failed: invoice=%s order=%s", invoice.invoice_number, order_number)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="No hemos podido enviar la factura. Inténtalo de nuevo más tarde o descárgala.",
+        )
 
-    def _send_invoice():
-        try:
-            from app.services.invoice import generate_invoice_pdf
-            from app.services.email import send_invoice_email
-            pdf_bytes = generate_invoice_pdf(order, customer_name, customer_email)
-            sent = send_invoice_email(
-                to_email=customer_email,
-                first_name=current_user.first_name or customer_name,
-                order_number=order_number,
-                pdf_bytes=pdf_bytes,
-            )
-            if not sent:
-                logger.error("Invoice email failed: order=%s to=%s", order_number, customer_email)
-            else:
-                logger.info("Invoice email sent: order=%s to=%s", order_number, customer_email)
-        except Exception as exc:
-            logger.error("Invoice email error: order=%s to=%s error=%s", order_number, customer_email, exc, exc_info=True)
-
-    background_tasks.add_task(_send_invoice)
-    return Message(message=f"Factura enviada a {customer_email}")
+    invoicing.mark_sent(invoice)
+    db.commit()
+    logger.info("Invoice email sent: invoice=%s order=%s", invoice.invoice_number, order_number)
+    return Message(message=f"Factura {invoice.invoice_number} enviada a {customer_email}")

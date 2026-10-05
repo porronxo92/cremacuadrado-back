@@ -179,3 +179,4 @@ class AdminOrderResponse(OrderResponse):
     payment_intent_id: Optional[str] = None
     shipping_status: Optional[str] = None
     updated_at: Optional[datetime] = None
+    invoices: List[dict] = []  # [{id, invoice_number, invoice_type, issued_at, total}]

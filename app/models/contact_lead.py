@@ -17,6 +17,7 @@ class ContactLead(Base):
     message = Column(Text, nullable=False)
     accepts_marketing = Column(Boolean, default=False, nullable=False)
     source = Column(String(50), default="contact_form", nullable=False)
+    privacy_accepted_at = Column(DateTime, nullable=True)  # 020_consents.sql
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     def __repr__(self):

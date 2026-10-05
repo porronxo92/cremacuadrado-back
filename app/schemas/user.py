@@ -57,6 +57,8 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     """User registration schema."""
     password: str = Field(..., min_length=8, max_length=100)
+    accept_terms: bool = False       # condiciones y privacidad (obligatorio)
+    marketing_opt_in: bool = False   # comunicaciones comerciales (opcional, sin premarcar)
 
     @field_validator('password')
     @classmethod

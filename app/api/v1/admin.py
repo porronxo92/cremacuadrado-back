@@ -129,6 +129,16 @@ def _order_resp(order: Order) -> AdminOrderResponse:
         payment_intent_id=order.payment_intent_id,
         shipping_status=order.shipping_status,
         updated_at=order.updated_at,
+        invoices=[
+            {
+                "id": inv.id,
+                "invoice_number": inv.invoice_number,
+                "invoice_type": inv.invoice_type,
+                "issued_at": inv.issued_at,
+                "total": inv.total,
+            }
+            for inv in order.invoices
+        ],
     )
 
 

@@ -2,10 +2,11 @@
 API Dependencies - Dependency injection for FastAPI endpoints.
 """
 from typing import Annotated, Optional
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError as JWTError
 
 from app.models.database import get_db
 from app.models.user import User
@@ -116,14 +117,18 @@ def get_current_user(
 
 
 def get_current_admin_user(
+    request: Request,
     current_user: Annotated[User, Depends(get_current_user)]
 ) -> User:
     """Get current user and verify admin role."""
     if current_user.role != "admin":
+        request.state.audit_denied_user = (current_user.id, current_user.email)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Se requieren permisos de administrador",
         )
+    # Leído por el middleware de auditoría (app/services/audit.py) al terminar la petición
+    request.state.audit_admin = (current_user.id, current_user.email)
     return current_user
 
 

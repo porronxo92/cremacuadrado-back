@@ -340,7 +340,7 @@ def delete_user(user_id: int, db: DbSession, admin_user: AdminUser):
     """Anonymise an account (RGPD). Orders are kept for fiscal records."""
     user = _get_user_or_404(db, user_id)
     _guard_admin_loss(db, admin_user, user, delete=True)
-    anonymize_user(user)
+    anonymize_user(db, user)
     if user.role == "admin":
         user.role = "customer"
     db.commit()
