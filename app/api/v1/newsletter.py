@@ -23,6 +23,7 @@ from app.schemas.common import Message
 from app.schemas.lead import NewsletterSubscribeRequest, NewsletterTokenRequest
 from app.services import consents
 from app.services.email import EmailService
+from app.utils.site import site_url
 
 logger = logging.getLogger("cremacuadrado.newsletter")
 
@@ -37,7 +38,7 @@ def _utcnow() -> datetime:
 
 
 def unsubscribe_url(lead: NewsletterLead) -> str:
-    return f"{settings.SITE_URL}/newsletter/baja?token={lead.unsubscribe_token}"
+    return f"{site_url()}/newsletter/baja?token={lead.unsubscribe_token}"
 
 
 @router.post("/subscribe", response_model=Message, status_code=status.HTTP_201_CREATED)
@@ -70,7 +71,7 @@ async def subscribe(request: Request, data: NewsletterSubscribeRequest, db: DbSe
     )
     db.commit()
 
-    confirm_url = f"{settings.SITE_URL}/newsletter/confirmar?token={lead.confirm_token}"
+    confirm_url = f"{site_url()}/newsletter/confirmar?token={lead.confirm_token}"
     if not EmailService.send_newsletter_confirmation_email(email, confirm_url):
         logger.error("Newsletter confirmation email failed")
     return Message(message=_GENERIC_OK)

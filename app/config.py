@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     SHIPPING_EXCLUDED_POSTCODE_PREFIXES: list[str] = ["07", "35", "38", "51", "52"]
     SHIPPING_ALLOWED_COUNTRIES: list[str] = ["ES", "España", "Espana", "Spain"]
 
+    # Un carrito de usuario sin actividad durante más de estas horas deja de estar
+    # "vigente": al volver a iniciar sesión se vacía en vez de recuperarse.
+    USER_CART_TTL_HOURS: int = 48
+
     # Conservación de datos (días) — ver app/services/retention.py
     RETENTION_GUEST_CART_DAYS: int = 30
     RETENTION_UNCONFIRMED_LEAD_DAYS: int = 30       # newsletter sin confirmar (doble opt-in)

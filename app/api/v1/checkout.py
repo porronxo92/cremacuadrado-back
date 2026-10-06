@@ -24,6 +24,7 @@ from app.schemas.order import (
 )
 from app.schemas.common import Message
 from app.services import consents, stripe_service
+from app.utils.site import request_site_url
 from app.config import settings
 from app.utils.url import normalize_image_url
 
@@ -193,6 +194,7 @@ async def validate_checkout(
 @router.post("/create-payment-intent", response_model=PaymentIntentResponse)
 async def create_payment_intent(
     checkout_data: CheckoutCreate,
+    request: Request,
     db: DbSession,
     current_user: CurrentUserOptional,
     cart_session: Optional[str] = Cookie(None),
@@ -237,6 +239,7 @@ async def create_payment_intent(
         discount=validation.discount,
         tax=validation.tax,
         tax_rate=Decimal(str(settings.TAX_RATE)),
+        site_url=request_site_url(request),
         total=validation.total,
         coupon_code=checkout_data.coupon_code or cart.coupon_code,
         guest_email=checkout_data.guest_email if not current_user else None,
@@ -346,6 +349,15 @@ def pre_confirm_order(data: CheckoutPreConfirm, request: Request, db: DbSession)
             status_code=status.HTTP_409_CONFLICT,
             detail="El pedido ya está pagado; los datos de facturación no se pueden cambiar",
         )
+    if data.shipping_address is not None:
+        address = data.shipping_address
+        if (address.country not in settings.SHIPPING_ALLOWED_COUNTRIES
+                or address.postal_code.strip()[:2] in settings.SHIPPING_EXCLUDED_POSTCODE_PREFIXES):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="De momento solo enviamos a España peninsular")
+        order.shipping_address = address.model_dump()
+    if data.guest_email and order.user_id is None:
+        order.guest_email = str(data.guest_email).lower()
     order.billing_address = data.billing.model_dump() if data.billing else None
     order.terms_version = settings.TERMS_VERSION
     order.terms_accepted_at = datetime.utcnow()

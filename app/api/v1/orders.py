@@ -5,7 +5,7 @@ import io
 import logging
 from typing import List
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import joinedload
 
@@ -20,6 +20,8 @@ from app.schemas.invoice import InvoiceSummary
 from app.services import invoicing
 from app.services.email import send_invoice_email
 from app.utils.url import normalize_image_url
+from app.utils.signing import verify_invoice_token
+from app.limiter import limiter
 from app.config import settings
 
 logger = logging.getLogger("cremacuadrado.orders")
@@ -65,6 +67,24 @@ def list_orders(
         ],
         total, page, page_size
     )
+
+
+@router.get("/invoice-download")
+@limiter.limit("20/minute")
+def download_invoice_with_token(request: Request, order: str, token: str, db: DbSession):
+    """
+    Descarga de la factura con el enlace firmado del email de confirmación.
+    Sirve también para compras como invitado (no requiere sesión).
+    """
+    if not verify_invoice_token(order, token):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Enlace no válido")
+    order_obj = db.query(Order).options(joinedload(Order.items)).filter(Order.order_number == order).first()
+    if not order_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Enlace no válido")
+    invoice = _ensure_primary_invoice(db, order_obj)
+    pdf_bytes = invoicing.get_pdf(db, invoice)
+    db.commit()
+    return _pdf_response(pdf_bytes, invoice.pdf_filename)
 
 
 @router.get("/{order_number}", response_model=OrderResponse)

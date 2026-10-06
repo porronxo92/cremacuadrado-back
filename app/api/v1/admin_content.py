@@ -17,6 +17,7 @@ from app.models.contact_lead import ContactLead
 from app.models.lead import NewsletterLead
 from app.models.order import Coupon, CouponRedemption, Order
 from app.models.point_of_sale import PointOfSale
+from app.services.geocoding import geocode_point_of_sale
 from app.models.pos_lead import PosLead
 from app.schemas.common import Message, PaginatedResponse
 from app.schemas.coupon import (
@@ -46,6 +47,10 @@ def create_point_of_sale(data: PointOfSaleCreate, db: DbSession, admin_user: Adm
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ya existe ese punto de venta en esa ciudad")
 
     store = PointOfSale(**data.model_dump())
+    if store.latitude is not None and store.longitude is not None:
+        store.geo_precision = "manual"
+    else:
+        geocode_point_of_sale(store)
     db.add(store)
     db.commit()
     db.refresh(store)
@@ -59,9 +64,29 @@ def update_point_of_sale(store_id: int, data: PointOfSaleUpdate, db: DbSession, 
     if not store:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Punto de venta no encontrado")
 
-    for field, value in data.model_dump(exclude_unset=True).items():
+    changes = data.model_dump(exclude_unset=True)
+    for field, value in changes.items():
         setattr(store, field, value)
 
+    if "latitude" in changes or "longitude" in changes:
+        store.geo_precision = "manual" if store.latitude is not None and store.longitude is not None else None
+    elif {"address", "city", "name"} & changes.keys() and store.geo_precision != "manual":
+        geocode_point_of_sale(store)
+
+    db.commit()
+    db.refresh(store)
+    return store
+
+
+@router.post("/points-of-sale/{store_id}/geocode", response_model=PointOfSaleAdminResponse)
+def geocode_point_of_sale_endpoint(store_id: int, db: DbSession, admin_user: AdminUser):
+    """Busca las coordenadas del punto de venta a partir de su dirección (OpenStreetMap)."""
+    store = db.query(PointOfSale).filter(PointOfSale.id == store_id).first()
+    if not store:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Punto de venta no encontrado")
+    if not geocode_point_of_sale(store):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="No se han encontrado coordenadas: revisa la dirección o ponlas a mano")
     db.commit()
     db.refresh(store)
     return store

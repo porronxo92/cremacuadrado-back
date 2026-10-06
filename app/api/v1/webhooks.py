@@ -21,6 +21,7 @@ from app.services import invoicing, stripe_service
 from app.services.coupon_redemptions import record_redemption, revert_redemption
 from app.services.email import EmailService, send_order_confirmation, OrderEmailData
 from app.config import settings
+from app.utils.site import use_site_url
 
 router = APIRouter()
 
@@ -96,7 +97,8 @@ async def stripe_webhook(request: Request, db: DbSession):
         data: dict = event["data"]["object"]
 
         if event_type == "payment_intent.succeeded":
-            _handle_payment_succeeded(db, data)
+            with use_site_url(_order_site_url(db, data.get("id"))):
+                _handle_payment_succeeded(db, data)
         elif event_type == "payment_intent.payment_failed":
             _handle_payment_failed(db, data)
         elif event_type == "payment_intent.canceled":
@@ -104,7 +106,8 @@ async def stripe_webhook(request: Request, db: DbSession):
         elif event_type == "payment_intent.processing":
             _update_pi_status(db, data["id"], "processing")
         elif event_type == "charge.refunded":
-            _handle_charge_refunded(db, data)
+            with use_site_url(_order_site_url(db, data.get("payment_intent"))):
+                _handle_charge_refunded(db, data)
         elif event_type == "charge.dispute.created":
             _handle_dispute_created(db, data)
         elif event_type == "charge.dispute.closed":
@@ -138,6 +141,14 @@ async def stripe_webhook(request: Request, db: DbSession):
 # ---------------------------------------------------------------------------
 # Internal handlers
 # ---------------------------------------------------------------------------
+
+def _order_site_url(db: Session, stripe_pi_id: str | None) -> str | None:
+    """Web desde la que se hizo el pedido, para que los emails enlacen a ella."""
+    if not stripe_pi_id:
+        return None
+    order = _get_order_by_pi(db, stripe_pi_id)
+    return order.site_url if order else None
+
 
 def _get_order_by_pi(db: Session, stripe_pi_id: str) -> Order | None:
     pi = db.query(PaymentIntentModel).filter(
@@ -260,8 +271,9 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
     # never handed out by an email and then rolled back. Runs in a SAVEPOINT:
     # an invoicing failure must NOT leave a charged order unpaid — the invoice
     # can be issued later on request or with scripts/backfill_invoices.py.
+    # La factura NO se adjunta al email de confirmación: el cliente la descarga
+    # o la pide desde "Mis pedidos" (siempre el mismo PDF guardado en el Blob).
     invoice = None
-    invoice_pdf = None
     try:
         with db.begin_nested():
             invoice = invoicing.issue_invoice_for_order(db, order_with_items)
@@ -272,11 +284,10 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
 
     if invoice is not None:
         try:
-            invoice_pdf = invoicing.store_pdf(db, invoice)
+            invoicing.store_pdf(db, invoice)
             db.commit()
         except Exception as exc:
             db.rollback()
-            invoice_pdf = None
             logger.error("Invoice PDF failed: invoice=%s error=%s", invoice.invoice_number, exc, exc_info=True)
 
     # Generate Correos shipment (defensive: must NOT break payment processing).
@@ -321,11 +332,7 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
             coupon_code=order.coupon_code,
             customer_notes=order.customer_notes,
             tracking_number=tracking_number,
-            invoice_number=invoice.invoice_number if invoice is not None and invoice_pdf else None,
-            invoice_pdf=invoice_pdf,
         ))
-        if sent and invoice is not None and invoice_pdf:
-            invoicing.mark_sent(invoice)
         if not sent:
             logger.error("Confirmation email failed: order=%s to=%s", order.order_number, customer_email)
     else:

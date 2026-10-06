@@ -4,6 +4,8 @@ from app.models.user import User, Address, PasswordResetToken
 from app.models.product import Category, Product, ProductImage, ProductNutrition, Review
 from app.models.cart import Cart, CartItem
 from app.models.order import Order, OrderItem, Coupon, CouponRedemption
+from app.models.payment import PaymentIntent, StripeWebhookEvent, Refund
+from app.models.point_of_sale import PointOfSale
 from app.models.shipment import Shipment, ShipmentEvent
 from app.models.blog import BlogPost, BlogCategory
 from app.models.lead import NewsletterLead
@@ -30,6 +32,10 @@ __all__ = [
     "OrderItem",
     "Coupon",
     "CouponRedemption",
+    "PaymentIntent",
+    "StripeWebhookEvent",
+    "Refund",
+    "PointOfSale",
     "Shipment",
     "ShipmentEvent",
     "BlogPost",

@@ -27,6 +27,7 @@ from app.logging_config import setup_logging, request_id_ctx
 from app.limiter import limiter
 from app.services import blob_service
 from app.services.audit import audit_admin_requests
+from app.utils.site import capture_site_url
 
 setup_logging(debug=settings.DEBUG)
 logger = logging.getLogger("cremacuadrado")
@@ -313,6 +314,8 @@ async def add_security_headers(request: Request, call_next):
 
 # Registro de accesos al API de administración (RGPD art. 32)
 app.middleware("http")(audit_admin_requests)
+# URL del frontend que hace la petición (enlaces correctos en los emails por entorno)
+app.middleware("http")(capture_site_url)
 
 # Include API routers
 app.include_router(api_v1_router, prefix="/api/v1")

@@ -1,6 +1,7 @@
 """
 Cart API endpoints.
 """
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 import uuid
@@ -35,10 +36,36 @@ def set_cart_cookie(response: Response, session_id: str) -> None:
     )
 
 
+def _discard_if_stale(db: Session, cart: Optional[Cart]) -> None:
+    """
+    Vacía el carrito de un usuario si lleva más de USER_CART_TTL_HOURS sin
+    actividad (sin añadir ni cambiar productos). Así, al volver a entrar, solo
+    se recupera un carrito reciente y no se suman productos de hace días.
+    """
+    if cart is None:
+        return
+    items = db.query(CartItem).filter(CartItem.cart_id == cart.id).all()
+    if not items:
+        return
+    last_activity = max(
+        [i.updated_at or i.created_at for i in items if (i.updated_at or i.created_at)]
+        + ([cart.updated_at] if cart.updated_at else [])
+    )
+    if last_activity.tzinfo is not None:
+        last_activity = last_activity.astimezone(timezone.utc).replace(tzinfo=None)
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=settings.USER_CART_TTL_HOURS)
+    if last_activity < cutoff:
+        for item in items:
+            db.delete(item)
+        cart.coupon_code = None
+        db.flush()
+
+
 def get_or_create_cart(db: Session, user: Optional[User] = None, session_id: Optional[str] = None) -> Cart:
     cart = None
     if user:
         user_cart = db.query(Cart).filter(Cart.user_id == user.id).first()
+        _discard_if_stale(db, user_cart)
         session_cart = (
             db.query(Cart).filter(Cart.session_id == session_id).first()
             if session_id else None

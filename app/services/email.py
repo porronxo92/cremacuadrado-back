@@ -20,6 +20,7 @@ from email.mime.text import MIMEText
 from typing import Literal, Optional
 
 from app.config import settings
+from app.utils.site import site_url
 
 logger = logging.getLogger("cremacuadrado.email")
 
@@ -262,11 +263,11 @@ def _wrap_layout(inner_html: str, unsubscribe_url: Optional[str] = None) -> str:
                 CremaCuadrado · Crema de pistacho manchego artesanal
               </p>
               <p style="margin:0;font-family:Arial,sans-serif;font-size:11px;color:#4a453d;">
-                <a href="{settings.SITE_URL}/privacidad" style="color:#6B6456;text-decoration:none;">Privacidad</a>
+                <a href="{site_url()}/privacidad" style="color:#6B6456;text-decoration:none;">Privacidad</a>
                 &nbsp;·&nbsp;
-                <a href="{settings.SITE_URL}/condiciones-venta" style="color:#6B6456;text-decoration:none;">Condiciones de venta</a>
+                <a href="{site_url()}/condiciones-venta" style="color:#6B6456;text-decoration:none;">Condiciones de venta</a>
                 &nbsp;·&nbsp;
-                <a href="{settings.SITE_URL}/devoluciones" style="color:#6B6456;text-decoration:none;">Devoluciones</a>
+                <a href="{site_url()}/devoluciones" style="color:#6B6456;text-decoration:none;">Devoluciones</a>
               </p>
               {unsubscribe}
             </td>
@@ -334,7 +335,7 @@ class OrderEmailData:
 
 
 def send_order_confirmation(data: OrderEmailData) -> bool:
-    order_url = f"{settings.SITE_URL}/account/orders"
+    order_url = f"{site_url()}/account/orders"
     date_str = data.order_date.strftime("%d/%m/%Y %H:%M")
 
     # Items rows
@@ -421,17 +422,19 @@ def send_order_confirmation(data: OrderEmailData) -> bool:
         <p style="margin:0;font-family:Arial,sans-serif;font-size:12px;color:#6B6456;line-height:1.6;">
           Tienes <strong>14 días naturales desde la recepción</strong> para desistir de la compra sin indicar
           el motivo, salvo para productos alimentarios desprecintados tras la entrega (art. 103 TRLGDCU).
-          Puedes ejercerlo desde <a href="{settings.SITE_URL}/desistimiento" style="color:#7B1716;">{settings.SITE_URL}/desistimiento</a>.
-          Consulta las <a href="{settings.SITE_URL}/condiciones-venta" style="color:#7B1716;">condiciones generales de venta</a>
+          Puedes ejercerlo desde <a href="{site_url()}/desistimiento" style="color:#7B1716;">{site_url()}/desistimiento</a>.
+          Consulta las <a href="{site_url()}/condiciones-venta" style="color:#7B1716;">condiciones generales de venta</a>
           (versión {settings.TERMS_VERSION}) aceptadas en este pedido.
         </p>
       </div>"""
 
-    invoice_note = ""
-    if data.invoice_pdf and data.invoice_number:
-        invoice_note = f"""
+    # Enlace firmado de descarga de la factura (sirve también a invitados).
+    from app.utils.signing import invoice_token
+    invoice_url = f"{site_url()}/factura?pedido={data.order_number}&token={invoice_token(data.order_number)}"
+    invoice_note = f"""
       <p style="margin:24px 0 0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
-        Adjuntamos la factura <strong>{data.invoice_number}</strong> de tu compra.
+        Puedes <a href="{invoice_url}" style="color:#7B1716;">descargar la factura de tu compra aquí</a>
+        o desde «Mis pedidos» si tienes cuenta.
       </p>"""
 
     inner = f"""
@@ -558,7 +561,7 @@ class EmailService:
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
             Gracias por registrarte en CremaCuadrado. Ya puedes disfrutar de nuestras cremas de pistacho manchego artesanales.
           </p>
-          {_btn(settings.SITE_URL + "/tienda", "Ver productos")}
+          {_btn(site_url() + "/tienda", "Ver productos")}
         """
         return _send(to_email, "¡Bienvenido a CremaCuadrado!", _wrap_layout(inner))
 
@@ -576,7 +579,7 @@ class EmailService:
             Si no has sido tú, ignora este email: no te escribiremos más.
             Responsable: CREMACUADRADO SL. Finalidad: envío de comunicaciones comerciales.
             Puedes darte de baja en cualquier momento. Más información en
-            <a href="{settings.SITE_URL}/privacidad" style="color:#7B1716;">{settings.SITE_URL}/privacidad</a>.
+            <a href="{site_url()}/privacidad" style="color:#7B1716;">{site_url()}/privacidad</a>.
           </p>
         """
         return _send(to_email, "Confirma tu suscripción · CremaCuadrado", _wrap_layout(inner))
@@ -593,7 +596,7 @@ class EmailService:
             <p style="margin:0 0 4px;font-family:Arial,sans-serif;font-size:12px;color:#6B6456;text-transform:uppercase;letter-spacing:1px;">Tu código de descuento</p>
             <p style="margin:0;font-family:Arial,sans-serif;font-size:24px;font-weight:700;color:#7B1716;letter-spacing:3px;">{coupon_code}</p>
           </div>
-          {_btn(settings.SITE_URL + "/tienda", "Ir a la tienda")}
+          {_btn(site_url() + "/tienda", "Ir a la tienda")}
           <p style="margin-top:24px;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
             Aplícalo en el carrito antes de pagar. Válido para tu primer pedido con una cuenta registrada.
           </p>
@@ -638,13 +641,13 @@ class EmailService:
             <strong>Motivo:</strong> {escape(reason or "—")}<br>
             <strong>Dentro de plazo (14 días):</strong> {"Sí" if within_term else "NO — revisar"}
           </p>
-          {_btn(settings.SITE_URL + "/admin/desistimientos", "Ver en el panel")}
+          {_btn(site_url() + "/admin/desistimientos", "Ver en el panel")}
         """
         return _send(settings.ADMIN_EMAIL, f"Desistimiento · pedido {order_number}", _wrap_layout(inner), mailbox="pedidos")
 
     @classmethod
     def send_password_reset_email(cls, to_email: str, reset_token: str) -> bool:
-        reset_url = f"{settings.SITE_URL}/auth/reset-password?token={reset_token}"
+        reset_url = f"{site_url()}/auth/reset-password?token={reset_token}"
         inner = f"""
           <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Restablecer contraseña</h2>
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
@@ -672,7 +675,7 @@ class EmailService:
           <p style="margin:0 0 24px;font-family:Arial,sans-serif;font-size:15px;color:#6B6456;">Pedido <strong>{order_number}</strong></p>
           <div style="font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;">{items_html}</div>
           <p style="margin-top:16px;font-family:Arial,sans-serif;font-size:18px;font-weight:700;color:#7B1716;">Total: {total}</p>
-          {_btn(settings.SITE_URL + "/account/orders", "Ver mi pedido")}
+          {_btn(site_url() + "/account/orders", "Ver mi pedido")}
         """
         return _send(
             to_email,
@@ -706,7 +709,7 @@ class EmailService:
         cls, to_email: str, order_number: str, customer_name: str, error_message: Optional[str] = None
     ) -> bool:
         """Notify the customer that their payment could not be processed."""
-        retry_url = f"{settings.SITE_URL}/carrito"
+        retry_url = f"{site_url()}/carrito"
         reason_block = ""
         if error_message:
             reason_block = f"""
@@ -753,7 +756,7 @@ class EmailService:
           <div style="margin:24px 0;padding:16px;background:#F4F1E9;border-radius:6px;text-align:center;">
             <p style="margin:0;font-family:Arial,sans-serif;font-size:18px;font-weight:700;color:#7B1716;">{label}</p>
           </div>
-          {_btn(settings.SITE_URL + "/account/orders", "Ver mis pedidos")}
+          {_btn(site_url() + "/account/orders", "Ver mis pedidos")}
         """
         return _send(to_email, f"Pedido {order_number} — {label} · CremaCuadrado", _wrap_layout(inner), mailbox="pedidos")
 
@@ -797,7 +800,7 @@ class EmailService:
           <div style="margin:24px 0 0;">
             {tracking_html}
           </div>
-          {_btn(settings.SITE_URL + "/admin/orders", "Ver en el panel admin")}
+          {_btn(site_url() + "/admin/orders", "Ver en el panel admin")}
         """
         return _send(
             settings.ADMIN_EMAIL,
@@ -822,7 +825,7 @@ class EmailService:
             Pedido {order_number} → {label}
           </h2>
           {tracking_line}
-          {_btn(settings.SITE_URL + "/admin/orders", "Ver en el panel admin")}
+          {_btn(site_url() + "/admin/orders", "Ver en el panel admin")}
         """
         return _send(
             settings.ADMIN_EMAIL,
@@ -856,7 +859,7 @@ class EmailService:
             contacto contigo en un plazo máximo de <strong>48 horas</strong> para contarte las condiciones
             comerciales y, si te interesa, enviarte una muestra gratuita.
           </p>
-          {_btn(settings.SITE_URL + "/para-tiendas", "Ver ventajas de ser punto de venta")}
+          {_btn(site_url() + "/para-tiendas", "Ver ventajas de ser punto de venta")}
         """
         return _send(to_email, "Hemos recibido tu solicitud · CremaCuadrado", _wrap_layout(inner))
 
@@ -910,7 +913,7 @@ class EmailService:
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
             Mientras tanto, puedes seguirnos en redes sociales o echar un vistazo a nuestro catálogo.
           </p>
-          {_btn(settings.SITE_URL + "/catalogo", "Ver productos")}
+          {_btn(site_url() + "/catalogo", "Ver productos")}
         """
         return _send(to_email, "Hemos recibido tu mensaje · CremaCuadrado", _wrap_layout(inner))
 
@@ -951,7 +954,7 @@ class EmailService:
     @classmethod
     def send_email_verification(cls, to_email: str, first_name: str, token: str) -> bool:
         """Send email address verification link."""
-        verify_url = f"{settings.SITE_URL}/auth/verify-email?token={token}"
+        verify_url = f"{site_url()}/auth/verify-email?token={token}"
         inner = f"""
           <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Verifica tu email</h2>
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">

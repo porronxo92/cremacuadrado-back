@@ -31,6 +31,8 @@ class Order(Base):
     terms_version = Column(String(20), nullable=True)
     terms_accepted_at = Column(DateTime, nullable=True)
     acceptance_ip = Column(String(45), nullable=True)
+    # Web desde la que se hizo el pedido (enlaces de los emails) — 023_site_url_pos_geo.sql
+    site_url = Column(String(255), nullable=True)
     total = Column(Numeric(10, 2), nullable=False)
     
     # Coupon

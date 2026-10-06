@@ -50,8 +50,12 @@ def _eur(value) -> str:
 
 
 def _pct(rate) -> str:
-    pct = (Decimal(str(rate)) * 100).normalize()
-    return f"{pct:f}".rstrip("0").rstrip(".") + " %"
+    """0.10 → "10 %", 0.21 → "21 %", 0.055 → "5,5 %"."""
+    pct = (Decimal(str(rate)) * 100).quantize(Decimal("0.01"))
+    text = f"{pct:f}"
+    if "." in text:  # solo se recortan ceros decimales, nunca los de la parte entera
+        text = text.rstrip("0").rstrip(".")
+    return text.replace(".", ",") + " %"
 
 
 def _p(text, style) -> Paragraph:
