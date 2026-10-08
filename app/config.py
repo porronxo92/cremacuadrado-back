@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     
     # Legal — versión vigente de los textos. Se guarda con cada aceptación /
     # consentimiento; súbela cuando cambie el texto publicado en el frontend.
-    TERMS_VERSION: str = "2026-10"     # condiciones generales de venta
+    TERMS_VERSION: str = "2026-10b"    # condiciones generales de venta
     PRIVACY_VERSION: str = "2026-10"   # política de privacidad
 
     # Envíos: solo península (las CGV lo indican). Prefijos de CP excluidos:

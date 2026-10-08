@@ -128,6 +128,15 @@ class ForgotPassword(BaseModel):
     email: EmailStr
 
 
+class EmailStatusRequest(BaseModel):
+    """Checkout: ¿este email ya tiene cuenta?"""
+    email: EmailStr
+
+
+class EmailStatusResponse(BaseModel):
+    registered: bool
+
+
 class ResetPassword(BaseModel):
     """Reset password schema."""
     token: str

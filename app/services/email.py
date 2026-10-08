@@ -12,12 +12,13 @@ import logging
 import smtplib
 from html import escape
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Literal, Optional
+from zoneinfo import ZoneInfo
 
 from app.config import settings
 from app.utils.site import site_url
@@ -25,6 +26,16 @@ from app.utils.site import site_url
 logger = logging.getLogger("cremacuadrado.email")
 
 MailboxKind = Literal["pedidos", "info"]
+
+_MADRID = ZoneInfo("Europe/Madrid")
+
+
+def _madrid(dt: datetime) -> datetime:
+    """Hora peninsular para mostrar en los emails. Las fechas de la BBDD son UTC
+    (naive) y el servidor de Vercel corre en UTC: sin convertir salían 1–2 h antes."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_MADRID)
 
 
 # ---------------------------------------------------------------------------
@@ -336,7 +347,7 @@ class OrderEmailData:
 
 def send_order_confirmation(data: OrderEmailData) -> bool:
     order_url = f"{site_url()}/account/orders"
-    date_str = data.order_date.strftime("%d/%m/%Y %H:%M")
+    date_str = _madrid(data.order_date).strftime("%d/%m/%Y %H:%M")
 
     # Items rows
     items_rows = ""
@@ -415,18 +426,6 @@ def send_order_confirmation(data: OrderEmailData) -> bool:
           <p style="margin:0 0 4px;font-family:Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#6B6456;">Notas del pedido</p>
           <p style="margin:0;font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;">{data.customer_notes}</p>
         </div>"""
-
-    legal_note = f"""
-      <div style="margin-top:24px;padding:16px;background-color:#F4F1E9;border-radius:6px;">
-        <p style="margin:0 0 6px;font-family:Arial,sans-serif;font-size:12px;font-weight:600;color:#1C1A14;">Información legal de tu compra</p>
-        <p style="margin:0;font-family:Arial,sans-serif;font-size:12px;color:#6B6456;line-height:1.6;">
-          Tienes <strong>14 días naturales desde la recepción</strong> para desistir de la compra sin indicar
-          el motivo, salvo para productos alimentarios desprecintados tras la entrega (art. 103 TRLGDCU).
-          Puedes ejercerlo desde <a href="{site_url()}/desistimiento" style="color:#7B1716;">{site_url()}/desistimiento</a>.
-          Consulta las <a href="{site_url()}/condiciones-venta" style="color:#7B1716;">condiciones generales de venta</a>
-          (versión {settings.TERMS_VERSION}) aceptadas en este pedido.
-        </p>
-      </div>"""
 
     # Enlace firmado de descarga de la factura (sirve también a invitados).
     from app.utils.signing import invoice_token
@@ -516,8 +515,6 @@ def send_order_confirmation(data: OrderEmailData) -> bool:
       </div>
 
       {invoice_note}
-
-      {legal_note}
 
       {_btn(order_url, "Ver mis pedidos")}
     """
@@ -618,7 +615,7 @@ class EmailService:
             <tr><td style="padding:4px 0;color:#6B6456;">Nº de solicitud</td><td style="padding:4px 0;"><strong>D-{request_id:06d}</strong></td></tr>
             <tr><td style="padding:4px 0;color:#6B6456;">Pedido</td><td style="padding:4px 0;">{order_number}</td></tr>
             <tr><td style="padding:4px 0;color:#6B6456;">Productos</td><td style="padding:4px 0;">{items}</td></tr>
-            <tr><td style="padding:4px 0;color:#6B6456;">Fecha de la solicitud</td><td style="padding:4px 0;">{requested_at.strftime("%d/%m/%Y %H:%M")} (UTC)</td></tr>
+            <tr><td style="padding:4px 0;color:#6B6456;">Fecha de la solicitud</td><td style="padding:4px 0;">{_madrid(requested_at).strftime("%d/%m/%Y %H:%M")} (hora peninsular)</td></tr>
           </table>
           <p style="font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;line-height:1.6;">
             En breve te escribiremos con las instrucciones para devolver los productos. Te reembolsaremos

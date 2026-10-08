@@ -16,7 +16,8 @@ from app.models.user import User, PasswordResetToken, EmailVerificationToken
 from app.models.lead import NewsletterLead
 from app.schemas.user import (
     UserCreate, UserLogin, UserResponse, Token,
-    ForgotPassword, ResetPassword, RefreshToken, GoogleAuthRequest
+    ForgotPassword, ResetPassword, RefreshToken, GoogleAuthRequest,
+    EmailStatusRequest, EmailStatusResponse,
 )
 from app.schemas.common import Message
 from app.utils.security import (
@@ -103,6 +104,21 @@ async def register(request: Request, user_data: UserCreate, db: DbSession):
         logger.info("Verification email sent: email=%s", user.email)
 
     return user
+
+
+@router.post("/email-status", response_model=EmailStatusResponse)
+@limiter.limit("10/minute")
+async def email_status(request: Request, data: EmailStatusRequest, db: DbSession):
+    """
+    Checkout de invitado: indica si el email ya tiene una cuenta activa, para
+    pedir al cliente que inicie sesión y el pedido quede asociado a su cuenta.
+    No revela más que /register (que ya responde «Ya existe una cuenta»);
+    limitado por IP para frenar la enumeración de emails.
+    """
+    exists = db.query(User.id).filter(
+        User.email == data.email.lower(), User.is_active.is_(True)
+    ).first() is not None
+    return EmailStatusResponse(registered=exists)
 
 
 @router.post("/login", response_model=Token)
