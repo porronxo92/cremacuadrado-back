@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session, joinedload
 from app.api.deps import DbSession, CurrentUserOptional
 from app.models.cart import Cart, CartItem
 from app.models.product import Product, ProductVariant
-from app.models.order import Coupon, Order
+from app.models.order import Coupon
+from app.services.coupon_redemptions import user_already_used
 from app.models.user import User
 from app.schemas.cart import (
     CartResponse, CartItemCreate, CartItemUpdate, CartItemResponse,
@@ -131,6 +132,13 @@ def cart_to_response(cart: Cart, db: Session) -> CartResponse:
     items = []
     subtotal = Decimal('0')
 
+    # El carrito muestra (y el checkout cobra) el precio vigente de cada formato
+    stale = [i for i in cart.items if i.variant and i.price_at_add != i.variant.price]
+    for item in stale:
+        item.price_at_add = item.variant.price
+    if stale:
+        db.commit()
+
     for item in cart.items:
         variant = item.variant
         product = item.product
@@ -162,12 +170,7 @@ def cart_to_response(cart: Cart, db: Session) -> CartResponse:
         if coupon and coupon.is_valid:
             # Per-user check: remove the coupon if this user already completed
             # an order with it (prevents reuse of single-use welcome coupons).
-            already_used = db.query(Order).filter(
-                Order.user_id == cart.user_id,
-                Order.coupon_code == cart.coupon_code,
-                Order.status.in_(['paid', 'processing', 'shipped', 'delivered']),
-            ).first()
-            if already_used:
+            if user_already_used(db, cart.user_id, cart.coupon_code):
                 cart.coupon_code = None
                 db.commit()
             else:
@@ -249,7 +252,7 @@ def add_to_cart(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no disponible")
 
     if not variant.is_in_stock:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Formato agotado")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Este formato está agotado")
 
     if item_data.quantity > variant.stock:
         raise HTTPException(
@@ -374,14 +377,14 @@ def apply_coupon(
     if cart.coupon_code:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Ya tienes un cupón aplicado. Quítalo antes de aplicar otro."
+            detail="Ya tienes un cupón aplicado. Quítalo para usar otro."
         )
 
     coupon = db.query(Coupon).filter(Coupon.code == coupon_data.code.upper()).first()
     if not coupon:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cupón no encontrado")
     if not coupon.is_valid:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cupón no válido o expirado")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El cupón no es válido o ha caducado")
 
     subtotal = cart.subtotal
     if subtotal < coupon.min_order_amount:
@@ -390,12 +393,7 @@ def apply_coupon(
             detail=f"El pedido mínimo para este cupón es {coupon.min_order_amount}€"
         )
 
-    already_used = db.query(Order).filter(
-        Order.user_id == current_user.id,
-        Order.coupon_code == coupon_data.code.upper(),
-        Order.status.in_(['paid', 'processing', 'shipped', 'delivered']),
-    ).first()
-    if already_used:
+    if user_already_used(db, current_user.id, coupon.code):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Este cupón ya fue utilizado en un pedido anterior"

@@ -15,6 +15,18 @@ from app.models.order import Coupon, CouponRedemption, Order
 logger = logging.getLogger("cremacuadrado.coupons")
 
 
+PAID_STATUSES = ("paid", "processing", "shipped", "delivered")
+
+
+def user_already_used(db: Session, user_id: int, code: str) -> bool:
+    """True if this user already has a paid order with the coupon (one use per customer)."""
+    return db.query(Order.id).filter(
+        Order.user_id == user_id,
+        func.upper(Order.coupon_code) == code.strip().upper(),
+        Order.status.in_(PAID_STATUSES),
+    ).first() is not None
+
+
 def record_redemption(db: Session, order: Order) -> None:
     """Create the redemption row for a paid order that used a coupon (idempotent per order)."""
     if not order.coupon_code:

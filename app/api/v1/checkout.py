@@ -24,6 +24,8 @@ from app.schemas.order import (
 )
 from app.schemas.common import Message
 from app.services import consents, stripe_service
+from app.services.coupon_redemptions import user_already_used
+from app.limiter import limiter
 from app.utils.site import request_site_url
 from app.config import settings
 from app.utils.url import normalize_image_url
@@ -137,6 +139,9 @@ async def validate_checkout(
             errors.append(f"El formato {variant.format} de '{product.name}' está agotado")
         elif item.quantity > variant.stock:
             errors.append(f"Solo hay {variant.stock} unidades del formato {variant.format} de '{product.name}'")
+        # Se cobra el precio vigente, no el de cuando se añadió al carrito
+        if variant and item.price_at_add != variant.price:
+            item.price_at_add = variant.price
     
     # Validate guest email
     if not current_user and not checkout_data.guest_email:
@@ -163,7 +168,11 @@ async def validate_checkout(
             coupon = db.query(Coupon).filter(
                 Coupon.code == coupon_code.upper()
             ).first()
-            if coupon and coupon.is_valid and subtotal >= coupon.min_order_amount:
+            if not coupon or not coupon.is_valid:
+                errors.append("Cupón no válido o expirado")
+            elif user_already_used(db, current_user.id, coupon.code):
+                errors.append("Este cupón ya fue utilizado en un pedido anterior")
+            elif subtotal >= coupon.min_order_amount:
                 discount = coupon.calculate_discount(subtotal)
     
     subtotal_after_discount = subtotal - discount
@@ -192,6 +201,7 @@ async def validate_checkout(
 
 
 @router.post("/create-payment-intent", response_model=PaymentIntentResponse)
+@limiter.limit("10/minute")
 async def create_payment_intent(
     checkout_data: CheckoutCreate,
     request: Request,
@@ -241,7 +251,8 @@ async def create_payment_intent(
         tax_rate=Decimal(str(settings.TAX_RATE)),
         site_url=request_site_url(request),
         total=validation.total,
-        coupon_code=checkout_data.coupon_code or cart.coupon_code,
+        # Solo se registra el cupón si ha aplicado descuento (no se gasta en balde)
+        coupon_code=((checkout_data.coupon_code or cart.coupon_code or '').upper() or None) if validation.discount > 0 else None,
         guest_email=checkout_data.guest_email if not current_user else None,
         customer_notes=checkout_data.customer_notes,
         payment_method="card",
@@ -272,7 +283,7 @@ async def create_payment_intent(
 
     db.flush()  # persist items
 
-    amount_cents = int(validation.total * 100)
+    amount_cents = int((validation.total * 100).to_integral_value())
     customer_email = current_user.email if current_user else checkout_data.guest_email
 
     # Create Stripe PaymentIntent

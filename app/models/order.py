@@ -2,9 +2,9 @@
 Order models - Orders, OrderItems, Coupons.
 """
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import json
-from sqlalchemy import Column, Integer, String, Text, Numeric, Boolean, DateTime, ForeignKey, CheckConstraint
+from sqlalchemy import Column, Integer, String, Text, Numeric, Boolean, DateTime, ForeignKey, CheckConstraint, Index, func
 from sqlalchemy.orm import relationship
 
 from app.models.database import Base
@@ -13,7 +13,7 @@ from app.models.database import Base
 class Order(Base):
     """Order model."""
     __tablename__ = "orders"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     order_number = Column(String(20), unique=True, nullable=False, index=True)
@@ -116,6 +116,13 @@ class Order(Base):
         return f"<Order {self.order_number}>"
 
 
+# Índices de 024_orders_guest_link_indexes.sql (parciales solo en PostgreSQL)
+Index("idx_orders_guest_email_lower", func.lower(Order.guest_email),
+      postgresql_where=Order.user_id.is_(None))
+Index("idx_orders_user_coupon", Order.user_id, func.upper(Order.coupon_code),
+      postgresql_where=Order.coupon_code.isnot(None))
+
+
 class OrderItem(Base):
     """Order item model."""
     __tablename__ = "order_items"
@@ -195,8 +202,8 @@ class Coupon(Base):
                 discount = min(discount, self.max_discount_amount)
         else:  # fixed
             discount = min(self.discount_value, subtotal)
-        
-        return discount
+
+        return Decimal(discount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     
     def __repr__(self):
         return f"<Coupon {self.code}>"

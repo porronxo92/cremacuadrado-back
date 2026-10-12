@@ -150,6 +150,9 @@ def _order_site_url(db: Session, stripe_pi_id: str | None) -> str | None:
     return order.site_url if order else None
 
 
+_PAYABLE_STATUSES = ("pending_payment", "payment_failed", "cancelled")
+
+
 def _get_order_by_pi(db: Session, stripe_pi_id: str) -> Order | None:
     pi = db.query(PaymentIntentModel).filter(
         PaymentIntentModel.stripe_payment_intent_id == stripe_pi_id
@@ -178,23 +181,19 @@ def handle_payment_succeeded(db: Session, stripe_pi_id: str) -> None:
     _handle_payment_succeeded(db, {"id": stripe_pi_id})
 
 
-def handle_payment_succeeded(db: Session, stripe_pi_id: str) -> None:
-    """
-    Public entry point for processing a succeeded PaymentIntent.
-    Called by both the Stripe webhook handler and the confirmation endpoint
-    (fallback for local dev or delayed webhooks).
-    Idempotent: skips processing if the order is already paid.
-    """
-    _handle_payment_succeeded(db, {"id": stripe_pi_id})
-
-
 def _handle_payment_succeeded(db: Session, data: dict) -> None:
     from app.models.product import Product
 
     stripe_pi_id = data["id"]
     order = _get_order_by_pi(db, stripe_pi_id)
-    if not order or order.status == "paid":
-        logger.info("payment_intent.succeeded skipped pi=%s (order already paid or not found)", stripe_pi_id)
+    if order:
+        # Bloquea la fila: el webhook y el fallback de /checkout/confirmation
+        # pueden llegar a la vez y no deben descontar stock ni facturar dos veces.
+        order = db.query(Order).filter(Order.id == order.id).with_for_update().populate_existing().first()
+    # «cancelled» incluido: la limpieza de pedidos fantasma puede cancelar un
+    # pedido cuyo pago llega después. Cualquier otro estado ya se procesó.
+    if not order or order.status not in _PAYABLE_STATUSES:
+        logger.info("payment_intent.succeeded skipped pi=%s (order already processed or not found)", stripe_pi_id)
         return
 
     logger.info("Order paid: order=%s pi=%s total=%s", order.order_number, stripe_pi_id, order.total)
@@ -332,6 +331,7 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
             coupon_code=order.coupon_code,
             customer_notes=order.customer_notes,
             tracking_number=tracking_number,
+            is_guest=order.user_id is None,
         ))
         if not sent:
             logger.error("Confirmation email failed: order=%s to=%s", order.order_number, customer_email)
@@ -482,6 +482,7 @@ def _handle_charge_refunded(db: Session, data: dict) -> None:
                     order_number=order.order_number,
                     customer_name=order.shipping_address.get("first_name", "Cliente"),
                     new_status="refunded",
+                    is_guest=order.user_id is None,
                 )
             except Exception as exc:
                 logger.error("Refund email failed: order=%s error=%s", order.order_number, exc, exc_info=True)

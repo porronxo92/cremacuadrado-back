@@ -32,7 +32,7 @@ def get_current_user_optional(
         )
         user_id: str = payload.get("sub")
         token_ver: int = payload.get("ver", 0)
-        if user_id is None:
+        if user_id is None or payload.get("type", "access") != "access":
             return None
     except JWTError:
         return None
