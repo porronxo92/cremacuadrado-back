@@ -19,7 +19,7 @@ from app.models.contact_lead import ContactLead
 from app.models.lead import NewsletterLead
 from app.models.payment import StripeWebhookEvent
 from app.models.pos_lead import PosLead
-from app.models.user import EmailVerificationToken, PasswordResetToken
+from app.models.user import EmailVerificationToken, LoginAttempt, PasswordResetToken
 
 logger = logging.getLogger("cremacuadrado.retention")
 
@@ -64,6 +64,11 @@ def purge(db: Session) -> dict[str, int]:
     ).delete(synchronize_session=False)
     counts["email_verification_tokens"] = db.query(EmailVerificationToken).filter(
         or_(EmailVerificationToken.expires_at < now, EmailVerificationToken.used.is_(True)),
+    ).delete(synchronize_session=False)
+
+    # Contadores de login fallido (IP + email): 7 días bastan para el freno
+    counts["login_attempts"] = db.query(LoginAttempt).filter(
+        LoginAttempt.updated_at < _ago(7),
     ).delete(synchronize_session=False)
 
     # Eventos de Stripe ya procesados (contienen emails y direcciones)

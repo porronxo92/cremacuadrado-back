@@ -9,7 +9,7 @@ IMPORTANT: trackpub uses DIFFERENT auth headers than other Correos APIs:
   - client_id: {CLIENT_ID_API}      (API Gateway credential from developers.correos.es)
   - client_secret: {CLIENT_SECRET_API}
 
-The polling job (poll_active_shipments) runs every 60 min via APScheduler,
+The polling job (poll_active_shipments) runs via Vercel Cron (/maintenance/poll-shipments) and APScheduler (local dev),
 queries Correos for active shipments, inserts ShipmentEvent rows, and updates
 shipment/order status accordingly.
 """

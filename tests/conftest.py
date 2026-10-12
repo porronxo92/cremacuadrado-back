@@ -26,13 +26,13 @@ from app.models.database import Base  # noqa: E402
 from app.models.invoice import Invoice, InvoiceSequence  # noqa: E402
 from app.models.order import Coupon, Order, OrderItem  # noqa: E402
 from app.models.payment import Refund  # noqa: E402
-from app.models.user import User, Address, PasswordResetToken, EmailVerificationToken  # noqa: E402
+from app.models.user import User, Address, PasswordResetToken, EmailVerificationToken, LoginAttempt  # noqa: E402
 from app.models.cart import Cart, CartItem  # noqa: E402
 from app.models.compliance import AdminAuditLog, ConsentRecord, PriceHistory, WithdrawalRequest  # noqa: E402
 from app.models.contact_lead import ContactLead  # noqa: E402
 from app.models.lead import NewsletterLead  # noqa: E402
 from app.models.pos_lead import PosLead  # noqa: E402
-from app.models.product import Category, Product, ProductVariant, Review  # noqa: E402
+from app.models.product import Category, Product, ProductImage, ProductVariant, Review  # noqa: E402
 from app.models.payment import StripeWebhookEvent  # noqa: E402
 import app.services.price_history  # noqa: E402,F401  (listeners)
 
@@ -41,9 +41,11 @@ _TABLES = [
     Address.__table__,
     PasswordResetToken.__table__,
     EmailVerificationToken.__table__,
+    LoginAttempt.__table__,
     Category.__table__,
     Product.__table__,
     ProductVariant.__table__,
+    ProductImage.__table__,
     Review.__table__,
     PriceHistory.__table__,
     Cart.__table__,

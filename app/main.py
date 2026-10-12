@@ -60,25 +60,15 @@ class CachedStaticFiles(StaticFiles):
 
 
 def _cancel_ghost_orders() -> None:
-    """Cancel pending_payment orders that have been waiting longer than the configured threshold."""
-    from app.models.order import Order
+    """Solo desarrollo local (APScheduler): en Vercel lo hace el cron."""
     from app.models.database import SessionLocal
-    _log = logging.getLogger("cremacuadrado.scheduler")
+    from app.services.order_cleanup import cancel_ghost_orders
     db = SessionLocal()
     try:
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.PENDING_ORDER_EXPIRE_MINUTES)
-        expired = db.query(Order).filter(
-            Order.status == "pending_payment",
-            Order.created_at < cutoff,
-        ).all()
-        if expired:
-            for order in expired:
-                order.status = "cancelled"
-            db.commit()
-            _log.info("Ghost orders cancelled", extra={"count": len(expired)})
+        cancel_ghost_orders(db)
     except Exception as exc:
         db.rollback()
-        _log.error("Ghost order cleanup failed: %s", exc, exc_info=True)
+        logging.getLogger("cremacuadrado.scheduler").error("Ghost order cleanup failed: %s", exc, exc_info=True)
     finally:
         db.close()
 
@@ -88,6 +78,14 @@ async def lifespan(app: FastAPI):
     """Application lifespan events."""
     logger.info("%s v%s starting", settings.APP_NAME, settings.APP_VERSION)
 
+    # En Vercel (serverless) no hay procesos persistentes: las tareas periódicas van
+    # por Vercel Cron (backend/vercel.json → /api/v1/maintenance/*). APScheduler solo
+    # arranca en desarrollo local, para no duplicar ejecuciones en producción.
+    if os.environ.get("VERCEL") or not settings.DEBUG:
+        yield
+        logger.info("Shutting down")
+        return
+
     try:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         from app.services.correos.tracking import poll_active_shipments
@@ -95,11 +93,11 @@ async def lifespan(app: FastAPI):
         scheduler.add_job(_cancel_ghost_orders, "interval", minutes=5, id="ghost_order_cleanup")
         scheduler.add_job(poll_active_shipments, "interval", minutes=60, id="correos_tracking_poll")
         scheduler.start()
-        logger.info("Scheduler started — ghost orders (5min) + tracking poll (60min)")
+        logger.info("Local scheduler started — ghost orders (5min) + tracking poll (60min)")
         yield
         scheduler.shutdown(wait=False)
     except Exception as exc:
-        logger.warning("Scheduler could not start (serverless?): %s", exc)
+        logger.warning("Scheduler could not start: %s", exc)
         yield
 
     logger.info("Shutting down")
