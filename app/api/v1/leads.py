@@ -3,7 +3,7 @@ B2B lead capture — landing page forms (/para-tiendas, /para-restaurantes).
 Leads are stored in their own table; no external CRM integration.
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request, status
 
@@ -29,6 +29,11 @@ async def create_pos_lead(request: Request, data: PosLeadRequest, db: DbSession)
                             detail="Debes aceptar la información de privacidad")
     email = data.email.lower()
 
+    recently_acked = db.query(PosLead.id).filter(
+        PosLead.email == email,
+        PosLead.created_at > datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=10),
+    ).first() is not None
+
     lead = PosLead(
         name=data.name,
         establishment_name=data.establishment_name,
@@ -43,7 +48,7 @@ async def create_pos_lead(request: Request, data: PosLeadRequest, db: DbSession)
                             source="para_tiendas", request=request)
     db.commit()
 
-    sent = EmailService.send_pos_lead_confirmation_email(email, data.establishment_name)
+    sent = recently_acked or EmailService.send_pos_lead_confirmation_email(email, data.establishment_name)
     if not sent:
         logger.error("POS lead confirmation email failed: email=%s", email)
 

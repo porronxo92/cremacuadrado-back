@@ -144,3 +144,15 @@ class EmailVerificationToken(Base):
 
     def __repr__(self):
         return f"<EmailVerificationToken for User {self.user_id}>"
+
+
+class LoginAttempt(Base):
+    """Contador de intentos de login fallidos por pareja (email, IP). Ver services/login_throttle.py."""
+    __tablename__ = "login_attempts"
+
+    email = Column(String(255), primary_key=True)
+    ip = Column(String(45), primary_key=True)
+    failures = Column(Integer, default=0, nullable=False)
+    locked_until = Column(DateTime, nullable=True)
+    last_success_at = Column(DateTime, nullable=True)  # IP «conocida» del titular
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)

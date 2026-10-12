@@ -23,6 +23,7 @@ from app.schemas.admin import (
     AdminSetPassword, AdminUserDetail, AdminUserItem, AdminUserStatusUpdate, AdminUserUpdate,
 )
 from app.schemas.common import Message, PaginatedResponse
+from app.services import login_throttle
 from app.services.email import EmailService
 from app.services.user_accounts import anonymize_user, revoke_sessions
 from app.utils.security import generate_reset_token, get_password_hash
@@ -360,6 +361,7 @@ def set_user_password(user_id: int, data: AdminSetPassword, db: DbSession, admin
     user.password_hash = get_password_hash(data.new_password)
     user.failed_login_attempts = 0
     user.locked_until = None
+    login_throttle.clear(db, user.email)
     revoke_sessions(user)
     db.commit()
     logger.info("Admin %s set a new password for user %s", admin_user.email, user.id)
@@ -399,6 +401,7 @@ def unlock_user(user_id: int, db: DbSession, admin_user: AdminUser):
     user = _get_user_or_404(db, user_id)
     user.failed_login_attempts = 0
     user.locked_until = None
+    login_throttle.clear(db, user.email)
     db.commit()
     return Message(message="Cuenta desbloqueada")
 

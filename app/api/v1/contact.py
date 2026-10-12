@@ -3,7 +3,7 @@ Contact form endpoint — /contacto page submissions.
 Saves the message as a ContactLead and notifies info@cremacuadrado.com.
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request, status
 
@@ -29,6 +29,13 @@ async def submit_contact_form(request: Request, data: ContactFormRequest, db: Db
                             detail="Debes aceptar la política de privacidad")
     email = data.email.lower().strip()
 
+    # Acuse al remitente: como mucho uno cada 10 min por email (no usar el formulario para
+    # llenar de correos el buzón de un tercero)
+    recently_acked = db.query(ContactLead.id).filter(
+        ContactLead.email == email,
+        ContactLead.created_at > datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=10),
+    ).first() is not None
+
     lead = ContactLead(
         name=data.name.strip(),
         email=email,
@@ -45,7 +52,7 @@ async def submit_contact_form(request: Request, data: ContactFormRequest, db: Db
     db.commit()
 
     # Confirmation to the sender
-    confirmed = EmailService.send_contact_form_confirmation(email, data.name.strip())
+    confirmed = recently_acked or EmailService.send_contact_form_confirmation(email, data.name.strip())
     if not confirmed:
         logger.error("Contact form confirmation email failed: email=%s", email)
 
@@ -60,4 +67,4 @@ async def submit_contact_form(request: Request, data: ContactFormRequest, db: Db
         logger.error("Contact form admin notification failed: email=%s", email)
 
     logger.info("Contact form submitted: email=%s accepts_marketing=%s", email, data.accepts_marketing)
-    return Message(message="Mensaje enviado. Te responderemos lo antes posible.")
+    return Message(message="Mensaje enviado. Te responderemos a tu email.")

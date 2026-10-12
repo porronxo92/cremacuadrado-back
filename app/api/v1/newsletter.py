@@ -9,7 +9,7 @@ Newsletter — alta con doble opt-in (LSSI art. 21 y RGPD art. 7).
 """
 import logging
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request, status
 
@@ -30,7 +30,7 @@ logger = logging.getLogger("cremacuadrado.newsletter")
 router = APIRouter()
 
 WELCOME_COUPON_CODE = "BIENVENIDO10"
-_GENERIC_OK = "Revisa tu email y confirma la suscripción para recibir tu código de descuento"
+_GENERIC_OK = "Te hemos escrito. Confirma la suscripción desde el email para recibir tu código de descuento."
 
 
 def _utcnow() -> datetime:
@@ -56,6 +56,12 @@ async def subscribe(request: Request, data: NewsletterSubscribeRequest, db: DbSe
     if lead and lead.confirmed_at and not lead.unsubscribed_at:
         # Ya suscrito: misma respuesta, sin reenviar nada
         logger.info("Newsletter subscribe: already confirmed")
+        return Message(message=_GENERIC_OK)
+
+    if lead and not lead.confirmed_at and lead.consent_at and _utcnow() - lead.consent_at < timedelta(minutes=10):
+        # Ya se envió la confirmación hace poco: no se reenvía (evita usar el formulario
+        # para llenar de correos el buzón de un tercero)
+        logger.info("Newsletter subscribe: confirmation recently sent")
         return Message(message=_GENERIC_OK)
 
     if lead is None:
@@ -96,8 +102,8 @@ async def confirm(request: Request, data: NewsletterTokenRequest, db: DbSession)
     if first_time:
         if not EmailService.send_newsletter_welcome_email(lead.email, lead.coupon_code, unsubscribe_url(lead)):
             logger.error("Newsletter welcome email failed: lead=%s", lead.id)
-        return Message(message="¡Suscripción confirmada! Te hemos enviado tu código de descuento por email.")
-    return Message(message="¡Suscripción confirmada!")
+        return Message(message="Suscripción confirmada. Te hemos enviado el código de descuento por email.")
+    return Message(message="Suscripción confirmada.")
 
 
 @router.post("/unsubscribe", response_model=Message)
@@ -121,4 +127,4 @@ async def unsubscribe(request: Request, data: NewsletterTokenRequest, db: DbSess
                 source="unsubscribe_link", request=request, user_id=user.id,
             )
         db.commit()
-    return Message(message="Te has dado de baja. No volverás a recibir comunicaciones comerciales.")
+    return Message(message="Te has dado de baja. No recibirás más comunicaciones comerciales.")

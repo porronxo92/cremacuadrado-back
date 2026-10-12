@@ -19,16 +19,14 @@ from app.utils.security import verify_password
 class AdminAuth(AuthenticationBackend):
     """
     Login del panel /admin (SQLAdmin), con las mismas protecciones que el API:
-    bloqueo tras varios intentos fallidos, sesión ligada al usuario y a su
+    bloqueo por (email, IP) tras varios intentos fallidos (services/login_throttle.py), sesión ligada al usuario y a su
     token_version (cerrar sesión o desactivar la cuenta la invalida al momento)
     y registro de cada intento en admin_audit_log.
     """
-    MAX_ATTEMPTS = 5
-    LOCKOUT_MINUTES = 15
 
     async def login(self, request: Request) -> bool:
         from datetime import datetime, timedelta, timezone
-        from app.services import audit
+        from app.services import audit, login_throttle
 
         form = await request.form()
         email = str(form.get("username", "")).strip().lower()
@@ -45,21 +43,22 @@ class AdminAuth(AuthenticationBackend):
                             admin_user_id=user.id if user else None, admin_email=email)
                 return False
 
+            ip0 = login_throttle.client_ip(request)
             if user is None or user.role != "admin" or not user.is_active or user.password_hash is None:
+                if not login_throttle.minutes_locked(db, email, ip0, None):
+                    login_throttle.record_failure(db, email, ip0, None)
+                    db.commit()
                 return fail("unknown_or_not_admin")
-            locked_until = user.locked_until.replace(tzinfo=None) if user.locked_until else None
-            if locked_until and now < locked_until:
+            # Mismo freno que el login del API: bloqueo por (email, IP), no por cuenta
+            ip = login_throttle.client_ip(request)
+            if login_throttle.minutes_locked(db, email, ip, user):
                 return fail("locked")
             if not verify_password(password, user.password_hash):
-                user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
-                if user.failed_login_attempts >= self.MAX_ATTEMPTS:
-                    user.locked_until = now + timedelta(minutes=self.LOCKOUT_MINUTES)
-                    user.failed_login_attempts = 0
+                login_throttle.record_failure(db, email, ip, user)
                 db.commit()
                 return fail("bad_password")
 
-            user.failed_login_attempts = 0
-            user.locked_until = None
+            login_throttle.record_success(db, email, ip, user)
             db.commit()
             request.session.clear()
             request.session["admin_user_id"] = user.id
