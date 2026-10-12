@@ -1,14 +1,52 @@
 """Shared account operations used by self-service and admin endpoints."""
+import logging
 import uuid
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.cart import Cart
 from app.models.compliance import ConsentRecord
 from app.models.contact_lead import ContactLead
 from app.models.lead import NewsletterLead
+from app.models.invoice import Invoice
+from app.models.order import Order
 from app.models.pos_lead import PosLead
 from app.models.user import Address, EmailVerificationToken, PasswordResetToken, User
+
+logger = logging.getLogger("cremacuadrado.accounts")
+
+
+def link_guest_orders(db: Session, user: User) -> int:
+    """
+    Vincula a la cuenta los pedidos de invitado hechos con su mismo email.
+
+    SEGURIDAD: solo si el email está verificado (`email_verified`); si no, cualquiera
+    podría registrarse con el email de otra persona y ver sus pedidos y direcciones.
+    Idempotente (solo toca `user_id IS NULL`). Las facturas no se modifican: guardan
+    su propia copia de los datos. No hace commit; devuelve nº de pedidos vinculados.
+    """
+    if not user or not user.email_verified or not user.is_active or not user.email:
+        return 0
+    email = user.email.lower()
+    order_ids = [
+        oid for (oid,) in db.query(Order.id).filter(
+            Order.user_id.is_(None), func.lower(Order.guest_email) == email,
+        ).all()
+    ]
+    if not order_ids:
+        return 0
+    db.query(Order).filter(Order.id.in_(order_ids), Order.user_id.is_(None)).update(
+        {Order.user_id: user.id}, synchronize_session=False,
+    )
+    # invoices.user_id es una copia aparte; el trigger de inmutabilidad solo permite NULL -> valor
+    db.query(Invoice).filter(Invoice.order_id.in_(order_ids), Invoice.user_id.is_(None)).update(
+        {Invoice.user_id: user.id}, synchronize_session=False,
+    )
+    linked = len(order_ids)
+    if linked:
+        logger.info("Guest orders linked: user_id=%s count=%s", user.id, linked)
+    return linked
 
 
 def anonymize_user(db: Session, user: User) -> None:
@@ -22,6 +60,13 @@ def anonymize_user(db: Session, user: User) -> None:
     Caller commits.
     """
     original_email = (user.email or "").lower()
+
+    # Un pedido vinculado desde invitado conserva guest_email: se limpia para que, si
+    # alguna vez la FK se pusiera a NULL, no se revinculara a otra persona con ese email.
+    # (Las facturas guardan su propia copia de los datos fiscales.)
+    db.query(Order).filter(Order.user_id == user.id, Order.guest_email.isnot(None)).update(
+        {Order.guest_email: None}, synchronize_session=False,
+    )
 
     # Datos de la cuenta
     user.email = f"deleted_{uuid.uuid4().hex[:8]}@cremacuadrado.invalid"

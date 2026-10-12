@@ -18,6 +18,7 @@ from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Literal, Optional
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from app.config import settings
@@ -294,7 +295,7 @@ def _wrap_layout(inner_html: str, unsubscribe_url: Optional[str] = None) -> str:
 
 def _btn(url: str, label: str) -> str:
     return f"""<p style="text-align:center;margin:32px 0 0;">
-  <a href="{url}"
+  <a href="{escape(url)}"
      style="display:inline-block;padding:14px 32px;background-color:#7B1716;color:#F4F1E9;
             font-family:Arial,sans-serif;font-size:14px;font-weight:600;text-decoration:none;
             border-radius:24px;letter-spacing:0.5px;">
@@ -327,7 +328,9 @@ class OrderEmailData:
         tracking_number: Optional[str] = None,
         invoice_number: Optional[str] = None,
         invoice_pdf: Optional[bytes] = None,
+        is_guest: bool = False,
     ):
+        self.is_guest = is_guest  # pedido sin cuenta (user_id NULL)
         self.to_email = to_email
         self.customer_name = customer_name
         self.order_number = order_number
@@ -355,7 +358,7 @@ def send_order_confirmation(data: OrderEmailData) -> bool:
         items_rows += f"""
         <tr>
           <td style="padding:12px 0;border-bottom:1px solid #F0EBE1;font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;">
-            {item['name']}
+            {escape(str(item['name']))}
           </td>
           <td style="padding:12px 8px;border-bottom:1px solid #F0EBE1;font-family:Arial,sans-serif;font-size:14px;color:#6B6456;text-align:center;">
             {item['qty']}
@@ -372,7 +375,7 @@ def send_order_confirmation(data: OrderEmailData) -> bool:
     shipping_label = "Envío gratuito" if data.shipping_cost == 0 else f"{data.shipping_cost:.2f} €"
     discount_row = ""
     if data.discount and data.discount > 0:
-        coupon_label = f" ({data.coupon_code})" if data.coupon_code else ""
+        coupon_label = f" ({escape(data.coupon_code)})" if data.coupon_code else ""
         discount_row = f"""
         <tr>
           <td colspan="3" style="padding:6px 0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;text-align:right;">
@@ -393,13 +396,13 @@ def send_order_confirmation(data: OrderEmailData) -> bool:
         addr.get("province", ""),
         addr.get("country", ""),
     ]
-    addr_html = "<br>".join(line for line in addr_lines if line)
+    addr_html = "<br>".join(escape(str(line)) for line in addr_lines if line)
 
     # Tracking (Correos) — present only when a localizador was generated
     tracking_block = ""
     info_text = (
-        "Estamos preparando tu pedido. Recibirás otro email en cuanto lo enviemos con el "
-        "número de seguimiento de Correos. El plazo de entrega habitual es de "
+        "Preparamos tu pedido y te escribimos otra vez cuando salga, con el "
+        "número de seguimiento de Correos. La entrega suele tardar "
         "<strong>2–4 días hábiles</strong>."
     )
     if data.tracking_number:
@@ -413,8 +416,8 @@ def send_order_confirmation(data: OrderEmailData) -> bool:
           {_btn(track_url, "Seguir en Correos")}
         </div>"""
         info_text = (
-            "Estamos preparando tu pedido. Puedes seguir su estado con el número de "
-            "seguimiento de arriba. El plazo de entrega habitual es de "
+            "Estamos preparando tu pedido. Con el número de seguimiento de arriba "
+            "puedes ver por dónde va. La entrega suele tardar "
             "<strong>2–4 días hábiles</strong>."
         )
 
@@ -424,25 +427,47 @@ def send_order_confirmation(data: OrderEmailData) -> bool:
         notes_block = f"""
         <div style="margin-top:24px;padding:16px;background-color:#F4F1E9;border-radius:6px;border-left:3px solid #E6C15A;">
           <p style="margin:0 0 4px;font-family:Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#6B6456;">Notas del pedido</p>
-          <p style="margin:0;font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;">{data.customer_notes}</p>
+          <p style="margin:0;font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;">{escape(data.customer_notes)}</p>
         </div>"""
 
     # Enlace firmado de descarga de la factura (sirve también a invitados).
     from app.utils.signing import invoice_token
     invoice_url = f"{site_url()}/factura?pedido={data.order_number}&token={invoice_token(data.order_number)}"
-    invoice_note = f"""
+    if data.is_guest:
+        # Invitado: sin «Ver mis pedidos» (no tiene cuenta). Acción principal: la factura;
+        # secundaria: crear cuenta con el mismo email para ver sus pedidos.
+        register_url = f"{site_url()}/auth/register?email={quote(data.to_email, safe='')}"
+        invoice_note = ""
+        main_action = f"""
+      <p style="margin:24px 0 0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
+        Guarda este email: con el botón de abajo puedes descargar la factura cuando quieras.
+      </p>
+      {_btn(invoice_url, "Descargar mi factura")}
+      <div style="margin-top:32px;padding:16px;background-color:#F4F1E9;border-radius:6px;">
+        <p style="margin:0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;line-height:1.6;">
+          Para seguir tus pedidos, crea una cuenta con este mismo email
+          (<strong>{escape(data.to_email)}</strong>) y confírmalo con el enlace que te enviaremos.
+          Tus pedidos aparecerán en «Mis pedidos».
+          <a href="{escape(register_url)}" style="color:#7B1716;">Crear mi cuenta</a>
+        </p>
+      </div>"""
+        text_tail = f"Descarga tu factura: {invoice_url}\nCrea una cuenta con este email para ver tus pedidos: {register_url}"
+    else:
+        invoice_note = f"""
       <p style="margin:24px 0 0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
         Puedes <a href="{invoice_url}" style="color:#7B1716;">descargar la factura de tu compra aquí</a>
         o desde «Mis pedidos» si tienes cuenta.
       </p>"""
+        main_action = _btn(order_url, "Ver mis pedidos")
+        text_tail = f"Puedes ver los detalles en: {order_url}"
 
     inner = f"""
       <!-- Greeting -->
       <h2 style="margin:0 0 6px;font-family:Arial,sans-serif;font-size:22px;font-weight:700;color:#7B1716;">
-        ¡Gracias por tu pedido, {data.customer_name}!
+        Gracias por tu pedido, {escape(data.customer_name)}
       </h2>
       <p style="margin:0 0 28px;font-family:Arial,sans-serif;font-size:15px;color:#6B6456;line-height:1.5;">
-        Hemos recibido tu pedido y lo estamos preparando con todo el cuidado que se merece.
+        Hemos recibido tu pedido y ya lo estamos preparando.
       </p>
 
       <!-- Order meta pill row -->
@@ -508,7 +533,7 @@ def send_order_confirmation(data: OrderEmailData) -> bool:
 
       <!-- Info box -->
       <div style="margin-top:32px;padding:20px;background-color:#FFF9ED;border-radius:6px;border:1px solid #E6C15A;">
-        <p style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:14px;font-weight:600;color:#1C1A14;">¿Qué pasa ahora?</p>
+        <p style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:14px;font-weight:600;color:#1C1A14;">Qué pasa ahora</p>
         <p style="margin:0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;line-height:1.6;">
           {info_text}
         </p>
@@ -516,16 +541,16 @@ def send_order_confirmation(data: OrderEmailData) -> bool:
 
       {invoice_note}
 
-      {_btn(order_url, "Ver mis pedidos")}
+      {main_action}
     """
 
     html = _wrap_layout(inner)
     subject = f"Pedido {data.order_number} confirmado · CremaCuadrado"
 
     text = (
-        f"Hola {data.customer_name}, tu pedido {data.order_number} ha sido confirmado.\n"
+        f"Hola {data.customer_name}, hemos confirmado tu pedido {data.order_number}.\n"
         f"Total: {data.total:.2f} €\n"
-        f"Puedes ver los detalles en: {order_url}"
+        f"{text_tail}"
     )
 
     if data.invoice_pdf and data.invoice_number:
@@ -554,13 +579,13 @@ class EmailService:
     @classmethod
     def send_welcome_email(cls, to_email: str, first_name: str) -> bool:
         inner = f"""
-          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">¡Bienvenido, {first_name}!</h2>
+          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Bienvenido, {escape(first_name or "")}</h2>
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-            Gracias por registrarte en CremaCuadrado. Ya puedes disfrutar de nuestras cremas de pistacho manchego artesanales.
+            Gracias por registrarte en CremaCuadrado. Tu cuenta ya está activa. Tienes la crema Pura y la Crunchy en formatos de 100 g, 200 g y 1 kg.
           </p>
           {_btn(site_url() + "/tienda", "Ver productos")}
         """
-        return _send(to_email, "¡Bienvenido a CremaCuadrado!", _wrap_layout(inner))
+        return _send(to_email, "Bienvenido a CremaCuadrado", _wrap_layout(inner))
 
     @classmethod
     def send_newsletter_confirmation_email(cls, to_email: str, confirm_url: str) -> bool:
@@ -568,12 +593,12 @@ class EmailService:
         inner = f"""
           <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Confirma tu suscripción</h2>
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-            Has pedido recibir recetas, novedades y ofertas de CremaCuadrado. Pulsa el botón para confirmarlo
-            y te enviaremos tu código de <strong>10% de descuento</strong> para el primer pedido.
+            Has pedido recibir recetas, novedades y ofertas de CremaCuadrado. Confírmalo con el botón
+            y te enviamos un código de <strong>10% de descuento</strong> para tu primer pedido.
           </p>
           {_btn(confirm_url, "Confirmar suscripción")}
           <p style="margin-top:24px;font-family:Arial,sans-serif;font-size:12px;color:#6B6456;line-height:1.6;">
-            Si no has sido tú, ignora este email: no te escribiremos más.
+            Si no has sido tú, ignora este email y no te escribiremos más.
             Responsable: CREMACUADRADO SL. Finalidad: envío de comunicaciones comerciales.
             Puedes darte de baja en cualquier momento. Más información en
             <a href="{site_url()}/privacidad" style="color:#7B1716;">{site_url()}/privacidad</a>.
@@ -585,9 +610,9 @@ class EmailService:
     def send_newsletter_welcome_email(cls, to_email: str, coupon_code: str, unsubscribe_url: Optional[str] = None) -> bool:
         """Cupón de bienvenida tras confirmar la suscripción (doble opt-in)."""
         inner = f"""
-          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">¡Bienvenido/a a CremaCuadrado!</h2>
+          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Suscripción confirmada</h2>
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-            Gracias por confirmar tu suscripción. Aquí tienes tu código para disfrutar de un <strong>10% de descuento en tu primer pedido</strong>.
+            Gracias por confirmar. Este es tu código de <strong>10% de descuento en tu primer pedido</strong>.
           </p>
           <div style="margin:24px 0;padding:20px;background-color:#F4F1E9;border-radius:6px;text-align:center;border:1px dashed #7B1716;">
             <p style="margin:0 0 4px;font-family:Arial,sans-serif;font-size:12px;color:#6B6456;text-transform:uppercase;letter-spacing:1px;">Tu código de descuento</p>
@@ -595,10 +620,10 @@ class EmailService:
           </div>
           {_btn(site_url() + "/tienda", "Ir a la tienda")}
           <p style="margin-top:24px;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
-            Aplícalo en el carrito antes de pagar. Válido para tu primer pedido con una cuenta registrada.
+            Aplícalo en el carrito antes de pagar. Vale para tu primer pedido con una cuenta registrada.
           </p>
         """
-        return _send(to_email, "Tu 10% de descuento te espera · CremaCuadrado", _wrap_layout(inner, unsubscribe_url))
+        return _send(to_email, "Tu código del 10% · CremaCuadrado", _wrap_layout(inner, unsubscribe_url))
 
     @classmethod
     def send_withdrawal_ack(cls, to_email: str, full_name: str, order_number: str,
@@ -636,7 +661,7 @@ class EmailService:
             <strong>Cliente:</strong> {escape(full_name)} ({escape(email)})<br>
             <strong>Productos:</strong> {escape(items_text or "Pedido completo")}<br>
             <strong>Motivo:</strong> {escape(reason or "—")}<br>
-            <strong>Dentro de plazo (14 días):</strong> {"Sí" if within_term else "NO — revisar"}
+            <strong>Dentro de plazo (14 días):</strong> {"Sí" if within_term else "NO, revisar"}
           </p>
           {_btn(site_url() + "/admin/desistimientos", "Ver en el panel")}
         """
@@ -648,11 +673,11 @@ class EmailService:
         inner = f"""
           <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Restablecer contraseña</h2>
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-            Has solicitado restablecer tu contraseña. Haz clic en el botón y crea una nueva. El enlace caduca en 1 hora.
+            Has pedido restablecer tu contraseña. Pulsa el botón y crea una nueva. El enlace caduca en 1 hora.
           </p>
           {_btn(reset_url, "Restablecer contraseña")}
           <p style="margin-top:24px;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
-            Si no has solicitado esto, ignora este email.
+            Si no lo has pedido tú, ignora este email.
           </p>
         """
         return _send(to_email, "Restablecer contraseña · CremaCuadrado", _wrap_layout(inner))
@@ -668,7 +693,7 @@ class EmailService:
     ) -> bool:
         """Legacy signature — kept for compatibility. Prefer send_order_confirmation()."""
         inner = f"""
-          <h2 style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">¡Gracias por tu pedido, {customer_name}!</h2>
+          <h2 style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Gracias por tu pedido, {escape(customer_name)}</h2>
           <p style="margin:0 0 24px;font-family:Arial,sans-serif;font-size:15px;color:#6B6456;">Pedido <strong>{order_number}</strong></p>
           <div style="font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;">{items_html}</div>
           <p style="margin-top:16px;font-family:Arial,sans-serif;font-size:18px;font-weight:700;color:#7B1716;">Total: {total}</p>
@@ -695,11 +720,11 @@ class EmailService:
                 {_btn(track_url, "Seguir en Correos")}
               </div>"""
         inner = f"""
-          <h2 style="margin:0 0 12px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">¡Tu pedido está en camino, {customer_name}!</h2>
+          <h2 style="margin:0 0 12px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Tu pedido ya está en camino, {escape(customer_name)}</h2>
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#6B6456;">Pedido <strong>{order_number}</strong> · Entrega estimada: 2–4 días hábiles</p>
           {tracking_block}
         """
-        return _send(to_email, f"Tu pedido {order_number} ha sido enviado · CremaCuadrado", _wrap_layout(inner), mailbox="pedidos")
+        return _send(to_email, f"Tu pedido {order_number} ya está en camino · CremaCuadrado", _wrap_layout(inner), mailbox="pedidos")
 
     @classmethod
     def send_payment_failed_email(
@@ -712,14 +737,14 @@ class EmailService:
             reason_block = f"""
               <div style="margin:16px 0 0;padding:16px;background-color:#FDECEA;border-radius:6px;border:1px solid #f5c6c0;">
                 <p style="margin:0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
-                  <strong style="color:#7B1716;">Motivo:</strong> {error_message}
+                  <strong style="color:#7B1716;">Motivo:</strong> {escape(error_message)}
                 </p>
               </div>"""
         inner = f"""
           <h2 style="margin:0 0 12px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">No hemos podido procesar tu pago</h2>
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-            Hola <strong>{customer_name}</strong>, ha habido un problema al cobrar tu pedido <strong>{order_number}</strong>.
-            No te preocupes, no se te ha realizado ningún cargo y tus productos siguen reservados en el carrito.
+            Hola <strong>{escape(customer_name)}</strong>, ha habido un problema al cobrar tu pedido <strong>{order_number}</strong>.
+            No se ha hecho ningún cargo y tus productos siguen en el carrito.
           </p>
           {reason_block}
           {_btn(retry_url, "Reintentar el pago")}
@@ -730,14 +755,15 @@ class EmailService:
         """
         return _send(
             to_email,
-            f"Problema con el pago de tu pedido {order_number} · CremaCuadrado",
+            f"No hemos podido cobrar tu pedido {order_number} · CremaCuadrado",
             _wrap_layout(inner),
             mailbox="pedidos",
         )
 
     @classmethod
     def send_order_status_update_email(
-        cls, to_email: str, order_number: str, customer_name: str, new_status: str
+        cls, to_email: str, order_number: str, customer_name: str, new_status: str,
+        is_guest: bool = False,
     ) -> bool:
         status_labels = {
             "processing": "En preparación",
@@ -749,13 +775,13 @@ class EmailService:
         label = status_labels.get(new_status, new_status)
         inner = f"""
           <h2 style="margin:0 0 12px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Actualización de tu pedido</h2>
-          <p style="font-family:Arial,sans-serif;font-size:15px;color:#6B6456;">Hola <strong>{customer_name}</strong>, tu pedido <strong>{order_number}</strong> ha cambiado de estado.</p>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#6B6456;">Hola <strong>{escape(customer_name)}</strong>, tu pedido <strong>{order_number}</strong> ha cambiado de estado.</p>
           <div style="margin:24px 0;padding:16px;background:#F4F1E9;border-radius:6px;text-align:center;">
             <p style="margin:0;font-family:Arial,sans-serif;font-size:18px;font-weight:700;color:#7B1716;">{label}</p>
           </div>
-          {_btn(site_url() + "/account/orders", "Ver mis pedidos")}
+          {"" if is_guest else _btn(site_url() + "/account/orders", "Ver mis pedidos")}
         """
-        return _send(to_email, f"Pedido {order_number} — {label} · CremaCuadrado", _wrap_layout(inner), mailbox="pedidos")
+        return _send(to_email, f"Pedido {order_number}: {label} · CremaCuadrado", _wrap_layout(inner), mailbox="pedidos")
 
     @classmethod
     def send_admin_new_order(
@@ -769,7 +795,7 @@ class EmailService:
         tracking_number: str | None = None,
     ) -> bool:
         """Notify admin@cremacuadrado.com of a new paid order."""
-        addr = shipping_address
+        addr = {k: escape(str(v)) if v is not None else "" for k, v in shipping_address.items()}
         address_html = (
             f"{addr.get('street', '')} {addr.get('street_2', '') or ''}<br>"
             f"{addr.get('postal_code', '')} {addr.get('city', '')}<br>"
@@ -782,13 +808,13 @@ class EmailService:
         ) if tracking_number else "<p style='font-family:Arial,sans-serif;font-size:13px;color:#6B6456;'>Envío Correos pendiente de generarse.</p>"
 
         inner = f"""
-          <h2 style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">🛒 Nuevo pedido: {order_number}</h2>
+          <h2 style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Nuevo pedido: {order_number}</h2>
           <p style="margin:0 0 24px;font-family:Arial,sans-serif;font-size:15px;color:#6B6456;">
-            <strong>{customer_name}</strong> — {customer_email}
+            <strong>{escape(customer_name)}</strong> · {escape(customer_email or "")}
           </p>
           <table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
             <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#6B6456;width:140px;">Productos</td>
-                <td style="padding:8px;border-bottom:1px solid #eee;color:#1C1A14;">{items_summary}</td></tr>
+                <td style="padding:8px;border-bottom:1px solid #eee;color:#1C1A14;">{escape(items_summary)}</td></tr>
             <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#6B6456;">Total</td>
                 <td style="padding:8px;border-bottom:1px solid #eee;font-weight:700;color:#7B1716;">{total:.2f} €</td></tr>
             <tr><td style="padding:8px;color:#6B6456;vertical-align:top;">Dirección envío</td>
@@ -801,7 +827,7 @@ class EmailService:
         """
         return _send(
             settings.ADMIN_EMAIL,
-            f"[CremaCuadrado] Nuevo pedido {order_number} — {total:.2f} €",
+            f"[CremaCuadrado] Nuevo pedido {order_number} · {total:.2f} €",
             _wrap_layout(inner),
             mailbox="pedidos",
         )
@@ -826,7 +852,7 @@ class EmailService:
         """
         return _send(
             settings.ADMIN_EMAIL,
-            f"[CremaCuadrado] Pedido {order_number} — {label}",
+            f"[CremaCuadrado] Pedido {order_number} · {label}",
             _wrap_layout(inner),
             mailbox="pedidos",
         )
@@ -837,10 +863,10 @@ class EmailService:
         inner = f"""
           <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Aviso de seguridad</h2>
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-            Hola <strong>{first_name}</strong>, te informamos de que se ha realizado un <strong>{event}</strong> en tu cuenta CremaCuadrado.
+            Hola <strong>{escape(first_name or "")}</strong>, se ha registrado un <strong>{event}</strong> en tu cuenta de CremaCuadrado.
           </p>
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-            Si no has realizado este cambio, ponte en contacto con nosotros de inmediato en
+            Si no has sido tú, escríbenos cuanto antes a
             <a href="mailto:info@cremacuadrado.com" style="color:#7B1716;">info@cremacuadrado.com</a>.
           </p>
         """
@@ -850,10 +876,10 @@ class EmailService:
     def send_pos_lead_confirmation_email(cls, to_email: str, establishment_name: str) -> bool:
         """Confirm receipt of a /para-tiendas B2B lead to the person who submitted it."""
         inner = f"""
-          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">¡Gracias por tu interés, {establishment_name}!</h2>
+          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Gracias por tu interés, {escape(establishment_name)}</h2>
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-            Hemos recibido tu solicitud para convertirte en punto de venta CremaCuadrado. Nos pondremos en
-            contacto contigo en un plazo máximo de <strong>48 horas</strong> para contarte las condiciones
+            Hemos recibido tu solicitud para convertirte en punto de venta CremaCuadrado. Te escribiremos en un
+            plazo máximo de <strong>48 horas</strong> para explicarte las condiciones
             comerciales y, si te interesa, enviarte una muestra gratuita.
           </p>
           {_btn(site_url() + "/para-tiendas", "Ver ventajas de ser punto de venta")}
@@ -871,6 +897,9 @@ class EmailService:
         phone: str,
     ) -> bool:
         """Notify the B2B team of a new /para-tiendas lead."""
+        subject = f"[CremaCuadrado] Nuevo lead punto de venta · {establishment_name}"
+        name, establishment_name, city = escape(name), escape(establishment_name), escape(city)
+        establishment_type, email, phone = escape(establishment_type), escape(email), escape(phone or "")
         inner = f"""
           <h2 style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Nuevo lead: punto de venta</h2>
           <p style="margin:0 0 24px;font-family:Arial,sans-serif;font-size:15px;color:#6B6456;">
@@ -893,7 +922,7 @@ class EmailService:
         """
         return _send(
             settings.B2B_NOTIFICATION_EMAIL,
-            f"[CremaCuadrado] Nuevo lead punto de venta — {establishment_name}",
+            subject,
             _wrap_layout(inner),
             mailbox="info",
         )
@@ -902,13 +931,13 @@ class EmailService:
     def send_contact_form_confirmation(cls, to_email: str, name: str) -> bool:
         """Confirm receipt of a /contacto form submission to the sender."""
         inner = f"""
-          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">¡Gracias por escribirnos, {name}!</h2>
+          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Gracias por escribirnos, {escape(name)}</h2>
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-            Hemos recibido tu mensaje y te responderemos lo antes posible en este mismo email.
-            Normalmente contestamos en menos de <strong>24&nbsp;horas</strong>.
+            Hemos recibido tu mensaje y te responderemos a este mismo email.
+            Solemos contestar en menos de <strong>24&nbsp;horas</strong>.
           </p>
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-            Mientras tanto, puedes seguirnos en redes sociales o echar un vistazo a nuestro catálogo.
+            Mientras tanto, puedes mirar el catálogo.
           </p>
           {_btn(site_url() + "/catalogo", "Ver productos")}
         """
@@ -923,6 +952,9 @@ class EmailService:
         accepts_marketing: bool,
     ) -> bool:
         """Notify info@ of a new contact form submission."""
+        reply_url = "mailto:" + email
+        subject = f"[CremaCuadrado] Nuevo contacto · {name}"
+        name, email, message = escape(name), escape(email), escape(message)
         marketing_label = "Sí" if accepts_marketing else "No"
         inner = f"""
           <h2 style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Nuevo mensaje de contacto</h2>
@@ -939,11 +971,11 @@ class EmailService:
             <tr><td style="padding:8px;vertical-align:top;color:#6B6456;">Mensaje</td>
                 <td style="padding:8px;color:#1C1A14;white-space:pre-wrap;">{message}</td></tr>
           </table>
-          {_btn("mailto:" + email, "Responder")}
+          {_btn(reply_url, "Responder")}
         """
         return _send(
             settings.SMTP_INFO_FROM_EMAIL,
-            f"[CremaCuadrado] Nuevo contacto — {name}",
+            subject,
             _wrap_layout(inner),
             mailbox="info",
         )
@@ -955,7 +987,7 @@ class EmailService:
         inner = f"""
           <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Verifica tu email</h2>
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-            Hola <strong>{first_name}</strong>, haz clic en el botón para verificar tu dirección de email. El enlace caduca en 24 horas.
+            Hola <strong>{escape(first_name or "")}</strong>, pulsa el botón para verificar tu dirección de email. El enlace caduca en 24 horas.
           </p>
           {_btn(verify_url, "Verificar email")}
           <p style="margin-top:24px;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
@@ -981,11 +1013,11 @@ def send_invoice_email(
         Tu {kind}
       </h2>
       <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-        Hola <strong>{first_name}</strong>, adjuntamos la {kind} <strong>{invoice_number}</strong>
+        Hola <strong>{escape(first_name or "")}</strong>, adjuntamos la {kind} <strong>{invoice_number}</strong>
         correspondiente al pedido <strong>{order_number}</strong>.
       </p>
       <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-        Puedes guardar el PDF adjunto para tus registros contables.
+        Guarda el PDF adjunto para tu contabilidad.
       </p>
       <div style="background:#EDE9DF;border-radius:8px;padding:16px 20px;margin:20px 0;">
         <p style="margin:0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">

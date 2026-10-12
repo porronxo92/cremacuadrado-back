@@ -347,6 +347,7 @@ def _do_update_order_status(order_id: int, status_data: OrderStatusUpdate, db, a
                 order_number=order.order_number,
                 customer_name=customer_name,
                 new_status=status_data.status,
+                is_guest=order.user_id is None,
             )
             if not sent:
                 logger.error("Order status update email failed: order=%s status=%s to=%s", order.order_number, status_data.status, customer_email)

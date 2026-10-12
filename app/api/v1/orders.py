@@ -224,9 +224,9 @@ def reorder(order_number: str, db: DbSession, current_user: CurrentUser):
     db.commit()
 
     if unavailable:
-        message = f"Se añadieron {added_count} productos. No disponibles: {', '.join(unavailable)}"
+        message = f"Hemos añadido {added_count} productos. No están disponibles: {', '.join(unavailable)}"
     else:
-        message = f"Se añadieron {added_count} productos al carrito"
+        message = f"Hemos añadido {added_count} productos al carrito"
 
     return Message(message=message)
 
@@ -250,7 +250,7 @@ def cancel_order(order_number: str, db: DbSession, current_user: CurrentUser):
 
     order.status = "cancelled"
     db.commit()
-    return Message(message="Pedido cancelado correctamente")
+    return Message(message="Pedido cancelado")
 
 
 def _get_owned_order(db, order_number: str, user_id: int) -> Order:
