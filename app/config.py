@@ -144,6 +144,12 @@ class Settings(BaseSettings):
     BLOB_INVOICE_READ_WRITE_TOKEN: str = ""
     BLOB_INVOICE_STORE_ID: str = ""  # opcional si el token ya incluye el store id
     BLOB_INVOICE_WEBHOOK_PUBLIC_KEY: str = ""  # reservado (webhooks del store), sin uso
+    # Carpeta raíz de los PDF en el store. Vacío = según VERCEL_ENV:
+    # production → invoices_prod, preview → invoices_stg, resto → invoices_dev.
+    # Staging y producción comparten store y numeración (F2026-000001 existe en
+    # las dos BD): sin carpetas separadas un entorno sobrescribiría al otro.
+    BLOB_INVOICE_PREFIX: str = ""
+    VERCEL_ENV: str = ""  # lo define Vercel: production | preview | development
 
     # Security headers
     SECURE_HEADERS: bool = True  # Set False only for local dev if needed

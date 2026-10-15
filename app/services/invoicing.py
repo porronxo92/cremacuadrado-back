@@ -131,10 +131,21 @@ def compute_record_hash(invoice: Invoice) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+_BLOB_PREFIX_BY_ENV = {"production": "invoices_prod", "preview": "invoices_stg"}
+
+
+def blob_prefix() -> str:
+    """Carpeta del entorno en el store de facturas (compartido entre entornos)."""
+    configured = settings.BLOB_INVOICE_PREFIX.strip().strip("/")
+    if configured:
+        return configured
+    return _BLOB_PREFIX_BY_ENV.get(settings.VERCEL_ENV.strip().lower(), "invoices_dev")
+
+
 def pdf_pathname(invoice: Invoice) -> str:
-    """invoices/AAAA/MM/<número>.pdf — sin datos personales en la ruta."""
+    """<carpeta del entorno>/AAAA/MM/<número>.pdf — sin datos personales en la ruta."""
     local = _local(invoice.issued_at)
-    return f"invoices/{local:%Y}/{local:%m}/{invoice.invoice_number}.pdf"
+    return f"{blob_prefix()}/{local:%Y}/{local:%m}/{invoice.invoice_number}.pdf"
 
 
 def month_bounds_utc(year: int, month: int) -> tuple[datetime, datetime]:

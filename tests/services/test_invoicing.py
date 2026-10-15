@@ -108,7 +108,20 @@ def test_year_follows_madrid_time(db):
     order = make_order(db, paid_at=datetime(2026, 12, 31, 23, 30))
     invoice = invoicing.issue_invoice_for_order(db, order)
     assert invoice.invoice_number == "F2027-000001"
-    assert invoicing.pdf_pathname(invoice) == "invoices/2027/01/F2027-000001.pdf"
+    assert invoicing.pdf_pathname(invoice) == "invoices_dev/2027/01/F2027-000001.pdf"
+
+
+@pytest.mark.parametrize("vercel_env, prefix, expected", [
+    ("production", "", "invoices_prod"),
+    ("preview", "", "invoices_stg"),
+    ("development", "", "invoices_dev"),
+    ("", "", "invoices_dev"),
+    ("production", "/otra_carpeta/", "otra_carpeta"),
+])
+def test_blob_prefix_separates_environments(monkeypatch, vercel_env, prefix, expected):
+    monkeypatch.setattr(invoicing.settings, "VERCEL_ENV", vercel_env)
+    monkeypatch.setattr(invoicing.settings, "BLOB_INVOICE_PREFIX", prefix)
+    assert invoicing.blob_prefix() == expected
 
 
 def test_unpaid_order_cannot_be_invoiced(db):
@@ -259,7 +272,7 @@ def test_stored_pdf_is_reused_on_resend(db, fake_blob):
     invoice = invoicing.issue_invoice_for_order(db, make_order(db))
     stored = invoicing.store_pdf(db, invoice)
     assert invoice.pdf_status == "stored"
-    assert invoice.blob_pathname == "invoices/2026/10/F2026-000001.pdf"
+    assert invoice.blob_pathname == "invoices_dev/2026/10/F2026-000001.pdf"
     assert invoice.pdf_sha256 == hashlib.sha256(stored).hexdigest()
 
     resent = invoicing.get_pdf(db, invoice)
