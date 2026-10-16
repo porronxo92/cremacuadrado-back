@@ -3,6 +3,7 @@ import logging
 import uuid
 
 from sqlalchemy import func
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.models.cart import Cart
@@ -25,6 +26,7 @@ def link_guest_orders(db: Session, user: User) -> int:
     podría registrarse con el email de otra persona y ver sus pedidos y direcciones.
     Idempotente (solo toca `user_id IS NULL`). Las facturas no se modifican: guardan
     su propia copia de los datos. No hace commit; devuelve nº de pedidos vinculados.
+    Nunca propaga errores de BD: los UPDATE van en un savepoint (todo o nada) y, si fallan, devuelve 0.
     """
     if not user or not user.email_verified or not user.is_active or not user.email:
         return 0
@@ -36,16 +38,22 @@ def link_guest_orders(db: Session, user: User) -> int:
     ]
     if not order_ids:
         return 0
-    db.query(Order).filter(Order.id.in_(order_ids), Order.user_id.is_(None)).update(
-        {Order.user_id: user.id}, synchronize_session=False,
-    )
-    # invoices.user_id es una copia aparte; el trigger de inmutabilidad solo permite NULL -> valor
-    db.query(Invoice).filter(Invoice.order_id.in_(order_ids), Invoice.user_id.is_(None)).update(
-        {Invoice.user_id: user.id}, synchronize_session=False,
-    )
+    try:
+        # Savepoint: si falla cualquier UPDATE se deshacen ambos y la sesión sigue usable
+        with db.begin_nested():
+            db.query(Order).filter(Order.id.in_(order_ids), Order.user_id.is_(None)).update(
+                {Order.user_id: user.id}, synchronize_session=False,
+            )
+            # invoices.user_id es una copia aparte; el trigger de inmutabilidad permite
+            # NULL -> valor y valor -> NULL, pero no valor -> otro valor
+            db.query(Invoice).filter(Invoice.order_id.in_(order_ids), Invoice.user_id.is_(None)).update(
+                {Invoice.user_id: user.id}, synchronize_session=False,
+            )
+    except SQLAlchemyError:
+        logger.exception("Guest orders link failed: user_id=%s orders=%s", user.id, len(order_ids))
+        return 0
     linked = len(order_ids)
-    if linked:
-        logger.info("Guest orders linked: user_id=%s count=%s", user.id, linked)
+    logger.info("Guest orders linked: user_id=%s count=%s", user.id, linked)
     return linked
 
 

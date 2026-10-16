@@ -162,3 +162,49 @@ def test_link_also_updates_invoice_user_id_and_anonymize_clears_guest_email(db):
     db.commit()
     db.refresh(order)
     assert order.user_id == user.id and order.guest_email is None
+
+
+# ── Robustez: la vinculación nunca tumba el login ────────────────────────────
+
+def _verified_user_with_invoice(db):
+    from app.models.invoice import Invoice
+    from app.services import invoicing
+    from app.utils.security import get_password_hash
+    order = _guest_order(db, "CC-6")
+    order.paid_at = datetime(2026, 10, 5, 10, 0)
+    order.tax_rate = Decimal("0.10")
+    db.commit()
+    inv = invoicing.issue_invoice_for_order(db, order)
+    db.commit()
+    user = _user(db, verified=True)
+    user.password_hash = get_password_hash("Clave12345!")
+    db.commit()
+    return order, inv, user
+
+
+def test_login_links_order_and_invoice(db, client):
+    order, inv, user = _verified_user_with_invoice(db)
+    r = client.post("/api/v1/auth/login", json={"email": "ana@example.com", "password": "Clave12345!"})
+    assert r.status_code == 200, r.text
+    db.refresh(order); db.refresh(inv)
+    assert order.user_id == user.id and inv.user_id == user.id
+
+
+def test_login_survives_invoice_update_failure(db, client):
+    from sqlalchemy import event
+    from sqlalchemy.exc import InternalError
+    order, inv, user = _verified_user_with_invoice(db)
+
+    def boom(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("UPDATE INVOICES"):
+            raise InternalError(statement, parameters, Exception("trigger: invoices inmutable"))
+
+    event.listen(db.get_bind(), "before_cursor_execute", boom)
+    try:
+        r = client.post("/api/v1/auth/login", json={"email": "ana@example.com", "password": "Clave12345!"})
+    finally:
+        event.remove(db.get_bind(), "before_cursor_execute", boom)
+    assert r.status_code == 200, r.text
+    assert "access_token" in r.json()
+    db.refresh(order); db.refresh(inv)
+    assert order.user_id is None and inv.user_id is None  # savepoint deshecho: todo o nada
