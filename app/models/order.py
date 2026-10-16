@@ -158,7 +158,7 @@ class Coupon(Base):
     id = Column(Integer, primary_key=True, index=True)
     code = Column(String(50), unique=True, nullable=False, index=True)
     description = Column(String(255), nullable=True)
-    discount_type = Column(String(20), nullable=False)  # percent, fixed
+    discount_type = Column(String(20), nullable=False)  # percent, fixed, free_shipping
     discount_value = Column(Numeric(10, 2), nullable=False)
     min_order_amount = Column(Numeric(10, 2), default=0, nullable=False)
     max_discount_amount = Column(Numeric(10, 2), nullable=True)  # For percent discounts
@@ -171,8 +171,11 @@ class Coupon(Base):
     
     # Constraints
     __table_args__ = (
-        CheckConstraint("discount_type IN ('percent', 'fixed')", name='check_discount_type'),
-        CheckConstraint('discount_value > 0', name='check_discount_positive'),
+        CheckConstraint("discount_type IN ('percent', 'fixed', 'free_shipping')", name='check_discount_type'),
+        CheckConstraint(
+            "discount_type = 'free_shipping' OR discount_value > 0",
+            name='check_discount_positive',
+        ),
     )
     
     @property
@@ -192,8 +195,8 @@ class Coupon(Base):
         return True
     
     def calculate_discount(self, subtotal: Decimal) -> Decimal:
-        """Calculate discount amount for a given subtotal."""
-        if subtotal < self.min_order_amount:
+        """Descuento sobre productos (0 para free_shipping: lo resuelve services/pricing.py)."""
+        if subtotal < self.min_order_amount or self.discount_type == 'free_shipping':
             return Decimal('0')
         
         if self.discount_type == 'percent':

@@ -25,6 +25,7 @@ from app.schemas.order import (
 from app.schemas.common import Message
 from app.services import consents, stripe_service
 from app.services.coupon_redemptions import user_already_used
+from app.services.pricing import compute_totals
 from app.limiter import limiter
 from app.utils.site import request_site_url
 from app.config import settings
@@ -58,33 +59,25 @@ async def get_shipping_cost(
         ).filter(Cart.id == cart.id).first()
         subtotal = cart.subtotal
     
-    # Calculate discount — coupons only apply to logged-in users' carts
-    discount = Decimal('0')
+    # Los cupones solo aplican a carritos de usuarios con sesión
+    coupon = None
     if cart and cart.coupon_code and current_user:
         coupon = db.query(Coupon).filter(
             Coupon.code == cart.coupon_code,
             Coupon.is_active == True
         ).first()
-        if coupon and coupon.is_valid:
-            discount = coupon.calculate_discount(subtotal)
-    
-    subtotal_after_discount = subtotal - discount
-    
-    if subtotal_after_discount >= settings.FREE_SHIPPING_THRESHOLD:
-        return ShippingCostResponse(
-            cost=Decimal('0'),
-            free_shipping_threshold=Decimal(str(settings.FREE_SHIPPING_THRESHOLD)),
-            amount_for_free_shipping=None,
-            message="¡Envío gratis!"
-        )
-    else:
-        remaining = Decimal(str(settings.FREE_SHIPPING_THRESHOLD)) - subtotal_after_discount
-        return ShippingCostResponse(
-            cost=Decimal(str(settings.SHIPPING_COST)),
-            free_shipping_threshold=Decimal(str(settings.FREE_SHIPPING_THRESHOLD)),
-            amount_for_free_shipping=remaining,
-            message=f"Añade {remaining:.2f}€ más para envío gratis"
-        )
+        if coupon and not coupon.is_valid:
+            coupon = None
+
+    totals = compute_totals(subtotal, coupon)
+    threshold = Decimal(str(settings.FREE_SHIPPING_THRESHOLD))
+    free = totals.shipping_cost == 0
+    return ShippingCostResponse(
+        cost=totals.shipping_cost,
+        free_shipping_threshold=threshold,
+        amount_for_free_shipping=None if free else threshold - (subtotal - totals.discount),
+        message=totals.shipping_message,
+    )
 
 
 @router.post("/validate", response_model=CheckoutValidation)
@@ -159,7 +152,7 @@ async def validate_checkout(
     
     # Discount — coupons are a logged-in benefit only, so they can't be used
     # by guests even if a code is passed directly in the request body.
-    discount = Decimal('0')
+    coupon = None
     if checkout_data.coupon_code or cart.coupon_code:
         if not current_user:
             errors.append("Inicia sesión o crea una cuenta para utilizar cupones de descuento")
@@ -170,30 +163,29 @@ async def validate_checkout(
             ).first()
             if not coupon or not coupon.is_valid:
                 errors.append("Cupón no válido o expirado")
+                coupon = None
             elif user_already_used(db, current_user.id, coupon.code):
                 errors.append("Este cupón ya fue utilizado en un pedido anterior")
-            elif subtotal >= coupon.min_order_amount:
-                discount = coupon.calculate_discount(subtotal)
-    
+                coupon = None
+
+    # Un cupón que no aplica (mínimo, envío ya gratis) no bloquea: simplemente no descuenta
+    totals = compute_totals(subtotal, coupon)
+    discount = totals.discount
+    shipping_cost = totals.shipping_cost
     subtotal_after_discount = subtotal - discount
-    
-    # Shipping
-    if subtotal_after_discount >= settings.FREE_SHIPPING_THRESHOLD:
-        shipping_cost = Decimal('0')
-    else:
-        shipping_cost = Decimal(str(settings.SHIPPING_COST))
-    
+
     # Tax (IVA included in prices, calculate for display)
     tax_rate = Decimal(str(settings.TAX_RATE))
     tax = (subtotal_after_discount + shipping_cost) * tax_rate / (1 + tax_rate)
-    
-    total = subtotal_after_discount + shipping_cost
-    
+
+    total = totals.total
+
     return CheckoutValidation(
         is_valid=len(errors) == 0,
         errors=errors,
         subtotal=subtotal,
         shipping_cost=shipping_cost,
+        shipping_discount=totals.shipping_discount,
         discount=discount,
         tax=tax.quantize(Decimal('0.01')),
         total=total,
@@ -251,8 +243,8 @@ async def create_payment_intent(
         tax_rate=Decimal(str(settings.TAX_RATE)),
         site_url=request_site_url(request),
         total=validation.total,
-        # Solo se registra el cupón si ha aplicado descuento (no se gasta en balde)
-        coupon_code=((checkout_data.coupon_code or cart.coupon_code or '').upper() or None) if validation.discount > 0 else None,
+        # Solo se registra el cupón si ha aplicado (descuento o envío anulado)
+        coupon_code=((checkout_data.coupon_code or cart.coupon_code or '').upper() or None) if (validation.discount > 0 or validation.shipping_discount > 0) else None,
         guest_email=checkout_data.guest_email if not current_user else None,
         customer_notes=checkout_data.customer_notes,
         payment_method="card",

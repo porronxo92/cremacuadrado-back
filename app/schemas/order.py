@@ -130,6 +130,7 @@ class CheckoutValidation(BaseModel):
     errors: List[str]
     subtotal: Decimal
     shipping_cost: Decimal
+    shipping_discount: Decimal = Decimal('0')
     discount: Decimal
     tax: Decimal
     total: Decimal

@@ -14,6 +14,7 @@ from app.models.cart import Cart, CartItem
 from app.models.product import Product, ProductVariant
 from app.models.order import Coupon
 from app.services.coupon_redemptions import user_already_used
+from app.services.pricing import compute_totals, coupon_rejection_reason
 from app.models.user import User
 from app.schemas.cart import (
     CartResponse, CartItemCreate, CartItemUpdate, CartItemResponse,
@@ -113,14 +114,6 @@ def get_or_create_cart(db: Session, user: Optional[User] = None, session_id: Opt
     return cart
 
 
-def calculate_shipping(subtotal: Decimal) -> tuple[Decimal, Optional[str]]:
-    threshold = Decimal(str(settings.FREE_SHIPPING_THRESHOLD))
-    if subtotal >= threshold:
-        return Decimal('0'), "Envio gratis!"
-    remaining = threshold - subtotal
-    return Decimal(str(settings.SHIPPING_COST)), f"Añade {remaining:.2f}€ más para envío gratis"
-
-
 def _load_cart(db: Session, cart_id: int) -> Cart:
     return db.query(Cart).options(
         joinedload(Cart.items).joinedload(CartItem.variant).joinedload(ProductVariant.product).joinedload(Product.images),
@@ -161,8 +154,7 @@ def cart_to_response(cart: Cart, db: Session) -> CartResponse:
             stock_available=variant.stock,
         ))
 
-    discount = Decimal('0')
-    coupon_info = None
+    coupon = None
     if cart.coupon_code and cart.user_id:
         coupon = db.query(Coupon).filter(
             Coupon.code == cart.coupon_code, Coupon.is_active == True
@@ -173,20 +165,25 @@ def cart_to_response(cart: Cart, db: Session) -> CartResponse:
             if user_already_used(db, cart.user_id, cart.coupon_code):
                 cart.coupon_code = None
                 db.commit()
-            else:
-                discount = coupon.calculate_discount(subtotal)
-                coupon_info = CouponInfo(
-                    code=coupon.code,
-                    discount_type=coupon.discount_type,
-                    discount_value=coupon.discount_value,
-                    discount_amount=discount,
-                )
+                coupon = None
         else:
             # Coupon no longer valid globally — remove it from the cart silently
             cart.coupon_code = None
             db.commit()
+            coupon = None
 
-    shipping_cost, shipping_message = calculate_shipping(subtotal - discount)
+    # Si el cupón deja de aplicar (mínimo, envío ya gratis) sigue en el carrito, con applies=False
+    totals = compute_totals(subtotal, coupon)
+    coupon_info = None
+    if coupon:
+        coupon_info = CouponInfo(
+            code=coupon.code,
+            discount_type=coupon.discount_type,
+            discount_value=coupon.discount_value,
+            discount_amount=totals.coupon_amount,
+            applies=totals.coupon_applies,
+            message=totals.coupon_message,
+        )
 
     return CartResponse(
         id=cart.id,
@@ -194,10 +191,11 @@ def cart_to_response(cart: Cart, db: Session) -> CartResponse:
         items=items,
         subtotal=subtotal,
         coupon=coupon_info,
-        discount=discount,
-        shipping_cost=shipping_cost,
-        shipping_message=shipping_message,
-        total=subtotal - discount + shipping_cost,
+        discount=totals.discount,
+        shipping_discount=totals.shipping_discount,
+        shipping_cost=totals.shipping_cost,
+        shipping_message=totals.shipping_message,
+        total=totals.total,
         updated_at=cart.updated_at,
     )
 
@@ -387,11 +385,9 @@ def apply_coupon(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El cupón no es válido o ha caducado")
 
     subtotal = cart.subtotal
-    if subtotal < coupon.min_order_amount:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"El pedido mínimo para este cupón es {coupon.min_order_amount}€"
-        )
+    reason = coupon_rejection_reason(coupon, subtotal)
+    if reason:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=reason)
 
     if user_already_used(db, current_user.id, coupon.code):
         raise HTTPException(

@@ -41,6 +41,8 @@ class CouponInfo(BaseModel):
     discount_type: str
     discount_value: Decimal
     discount_amount: Decimal
+    applies: bool = True
+    message: Optional[str] = None
 
 
 class CartResponse(BaseModel):
@@ -50,6 +52,7 @@ class CartResponse(BaseModel):
     subtotal: Decimal
     coupon: Optional[CouponInfo]
     discount: Decimal
+    shipping_discount: Decimal = Decimal('0')
     shipping_cost: Decimal
     shipping_message: Optional[str]
     total: Decimal
