@@ -25,7 +25,7 @@ from app.schemas.order import (
 from app.schemas.common import Message
 from app.services import consents, stripe_service
 from app.services.coupon_redemptions import user_already_used
-from app.services.pricing import compute_totals
+from app.services.pricing import compute_totals, shipping_zone
 from app.limiter import limiter
 from app.utils.site import request_site_url
 from app.config import settings
@@ -34,6 +34,11 @@ from app.utils.url import normalize_image_url
 logger = logging.getLogger("cremacuadrado.checkout")
 router = APIRouter()
 
+QUOTE_ZONE_ERROR = (
+    "No podemos cobrar envíos a Canarias, Ceuta ni Melilla desde la web: hay trámites de "
+    "aduana y calculamos el envío a medida. Pídenos presupuesto por WhatsApp."
+)
+
 
 @router.get("/shipping-cost", response_model=ShippingCostResponse)
 async def get_shipping_cost(
@@ -41,8 +46,9 @@ async def get_shipping_cost(
     current_user: CurrentUserOptional,
     cart_session: Optional[str] = Cookie(None),
     x_cart_session: Optional[str] = Header(None, alias="X-Cart-Session"),
+    postal_code: Optional[str] = None,
 ):
-    """Calculate shipping cost for current cart."""
+    """Calculate shipping cost for current cart (por zona si se indica el CP)."""
     session_id = cart_session or x_cart_session
     # Get cart
     cart = None
@@ -69,14 +75,17 @@ async def get_shipping_cost(
         if coupon and not coupon.is_valid:
             coupon = None
 
-    totals = compute_totals(subtotal, coupon)
+    zone = shipping_zone(postal_code)
+    totals = compute_totals(subtotal, coupon, zone)
     threshold = Decimal(str(settings.FREE_SHIPPING_THRESHOLD))
-    free = totals.shipping_cost == 0
+    # Solo la península tiene umbral de envío gratis
+    free = zone != "peninsula" or totals.shipping_cost == 0
     return ShippingCostResponse(
         cost=totals.shipping_cost,
         free_shipping_threshold=threshold,
         amount_for_free_shipping=None if free else threshold - (subtotal - totals.discount),
         message=totals.shipping_message,
+        shipping_zone=zone,
     )
 
 
@@ -140,12 +149,13 @@ async def validate_checkout(
     if not current_user and not checkout_data.guest_email:
         errors.append("Se requiere email para compras como invitado")
 
-    # Ámbito de envío de las condiciones de venta: España peninsular
+    # Ámbito de envío: España peninsular y Baleares; el resto, presupuesto por WhatsApp
     address = checkout_data.shipping_address
+    zone = shipping_zone(address.postal_code)
     if address.country not in settings.SHIPPING_ALLOWED_COUNTRIES:
-        errors.append("De momento solo enviamos a España peninsular")
-    elif address.postal_code.strip()[:2] in settings.SHIPPING_EXCLUDED_POSTCODE_PREFIXES:
-        errors.append("De momento no enviamos a Baleares, Canarias, Ceuta ni Melilla. Escríbenos a info@cremacuadrado.com")
+        errors.append("De momento solo enviamos a España")
+    elif zone == "quote":
+        errors.append(QUOTE_ZONE_ERROR)
     
     # Calculate totals
     subtotal = cart.subtotal
@@ -169,7 +179,7 @@ async def validate_checkout(
                 coupon = None
 
     # Un cupón que no aplica (mínimo, envío ya gratis) no bloquea: simplemente no descuenta
-    totals = compute_totals(subtotal, coupon)
+    totals = compute_totals(subtotal, coupon, zone)
     discount = totals.discount
     shipping_cost = totals.shipping_cost
     subtotal_after_discount = subtotal - discount
@@ -189,6 +199,7 @@ async def validate_checkout(
         discount=discount,
         tax=tax.quantize(Decimal('0.01')),
         total=total,
+        shipping_zone=zone,
     )
 
 
@@ -331,7 +342,63 @@ async def create_payment_intent(
     )
 
 
-@router.post("/pre-confirm", response_model=Message)
+class PreConfirmResponse(Message):
+    """Mensaje + importes finales (el envío puede cambiar al cambiar de zona)."""
+    total: Optional[Decimal] = None
+    shipping_cost: Optional[Decimal] = None
+
+
+REPRICE_ERROR = "No hemos podido actualizar el importe del pedido. Inténtalo de nuevo."
+
+
+def _reprice_for_address(db: Session, order: Order, address) -> None:
+    """
+    El pedido se creó con la dirección de ese momento. Si la zona de la dirección final
+    cambia el importe, recalcula pedido y PaymentIntent (mismo cálculo que validate).
+    Si Stripe falla no se guarda nada.
+    """
+    coupon = None
+    if order.coupon_code:
+        coupon = db.query(Coupon).filter(Coupon.code == order.coupon_code.upper()).first()
+        if coupon and not coupon.is_valid:
+            coupon = None
+    totals = compute_totals(order.subtotal, coupon, shipping_zone(address.postal_code))
+    if totals.shipping_cost == order.shipping_cost and totals.total == order.total:
+        return
+
+    pi_id = order.payment_intent_id
+    try:
+        pi = stripe_service.retrieve_payment_intent(pi_id)
+    except stripe_lib.StripeError:
+        logger.error("pre-confirm: no se pudo leer el PI %s", pi_id, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=REPRICE_ERROR)
+    if pi.status not in stripe_service.MODIFIABLE_PI_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El pago de este pedido ya está en curso y no se puede cambiar el importe. "
+                   "Vuelve al carrito para empezar un pedido nuevo.",
+        )
+
+    amount_cents = int((totals.total * 100).to_integral_value())
+    try:
+        stripe_service.modify_payment_intent_amount(pi_id, amount_cents)
+    except stripe_lib.StripeError:
+        db.rollback()
+        logger.error("pre-confirm: Stripe no modificó el PI %s", pi_id, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=REPRICE_ERROR)
+
+    tax_rate = Decimal(str(order.tax_rate if order.tax_rate is not None else settings.TAX_RATE))
+    order.discount = totals.discount
+    order.shipping_cost = totals.shipping_cost
+    order.total = totals.total
+    order.tax = (totals.total * tax_rate / (1 + tax_rate)).quantize(Decimal("0.01"))
+    pi_record = db.query(PaymentIntentModel).filter(
+        PaymentIntentModel.stripe_payment_intent_id == pi_id).first()
+    if pi_record:
+        pi_record.amount = amount_cents
+
+
+@router.post("/pre-confirm", response_model=PreConfirmResponse)
 def pre_confirm_order(data: CheckoutPreConfirm, request: Request, db: DbSession):
     """
     Se llama justo antes de confirmar el pago en Stripe. Registra la aceptación
@@ -354,10 +421,12 @@ def pre_confirm_order(data: CheckoutPreConfirm, request: Request, db: DbSession)
         )
     if data.shipping_address is not None:
         address = data.shipping_address
-        if (address.country not in settings.SHIPPING_ALLOWED_COUNTRIES
-                or address.postal_code.strip()[:2] in settings.SHIPPING_EXCLUDED_POSTCODE_PREFIXES):
+        if address.country not in settings.SHIPPING_ALLOWED_COUNTRIES:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                                detail="De momento solo enviamos a España peninsular")
+                                detail="De momento solo enviamos a España")
+        if shipping_zone(address.postal_code) == "quote":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=QUOTE_ZONE_ERROR)
+        _reprice_for_address(db, order, address)
         order.shipping_address = address.model_dump()
     if data.guest_email and order.user_id is None:
         order.guest_email = str(data.guest_email).lower()
@@ -369,7 +438,8 @@ def pre_confirm_order(data: CheckoutPreConfirm, request: Request, db: DbSession)
         logger.warning("Terms version mismatch: order=%s client=%s server=%s",
                        order.order_number, data.terms_version, settings.TERMS_VERSION)
     db.commit()
-    return Message(message="Pedido listo para el pago")
+    return PreConfirmResponse(message="Pedido listo para el pago", total=order.total,
+                              shipping_cost=order.shipping_cost)
 
 
 @router.post("/complete", response_model=OrderResponse)

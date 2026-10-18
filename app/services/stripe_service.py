@@ -57,3 +57,13 @@ def verify_webhook_signature(payload: bytes, sig_header: str) -> stripe.Event:
     if not settings.STRIPE_WEBHOOK_SECRET:
         raise RuntimeError("STRIPE_WEBHOOK_SECRET is not configured")
     return stripe.Webhook.construct_event(payload, sig_header, settings.STRIPE_WEBHOOK_SECRET)
+
+
+# Estados en los que Stripe permite cambiar el importe de un PaymentIntent
+MODIFIABLE_PI_STATUSES = ("requires_payment_method", "requires_confirmation")
+
+
+def modify_payment_intent_amount(pi_id: str, amount: int) -> stripe.PaymentIntent:
+    """Cambia el importe (céntimos) de un PaymentIntent aún sin confirmar."""
+    s = _get_stripe()
+    return s.PaymentIntent.modify(pi_id, amount=amount)

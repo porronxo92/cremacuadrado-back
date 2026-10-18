@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.order import Coupon, CouponRedemption, Order
-from app.services.pricing import FREE_SHIPPING_TYPE
+from app.services.pricing import FREE_SHIPPING_TYPE, shipping_zone
 
 logger = logging.getLogger("cremacuadrado.coupons")
 
@@ -36,6 +36,9 @@ def _redeemed_amount(order: Order, coupon: Coupon | None):
     el envío anulado es siempre el coste fijo de envío (el cupón solo aplica si lo habría).
     """
     if coupon is not None and coupon.discount_type == FREE_SHIPPING_TYPE:
+        postal = (order.shipping_address or {}).get("postal_code")
+        if shipping_zone(postal) == "baleares":
+            return Decimal(str(settings.SHIPPING_COST_BALEARES))
         return Decimal(str(settings.SHIPPING_COST))
     return order.discount or 0
 

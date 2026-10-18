@@ -17,6 +17,7 @@ class ShippingCostResponse(BaseModel):
     free_shipping_threshold: Decimal
     amount_for_free_shipping: Optional[Decimal]
     message: Optional[str]
+    shipping_zone: str = "peninsula"  # peninsula | baleares | quote
 
 
 # =============================================================================
@@ -134,6 +135,7 @@ class CheckoutValidation(BaseModel):
     discount: Decimal
     tax: Decimal
     total: Decimal
+    shipping_zone: str = "peninsula"  # peninsula | baleares | quote
 
 
 # =============================================================================

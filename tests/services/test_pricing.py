@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.api.v1.cart import _load_cart, apply_coupon, cart_to_response
-from app.api.v1.checkout import get_shipping_cost, validate_checkout
+from app.api.v1.checkout import QUOTE_ZONE_ERROR, get_shipping_cost, validate_checkout
 from app.models.cart import Cart, CartItem
 from app.models.order import Coupon, Order
 from app.models.product import Product, ProductVariant
@@ -15,8 +15,9 @@ from app.models.user import User
 from app.schemas.cart import ApplyCoupon
 from app.schemas.coupon import CouponCreate, CouponUpdate
 from app.schemas.order import AddressInput, CheckoutCreate
+from app.utils.spain import PROVINCES
 from app.services.coupon_redemptions import _redeemed_amount
-from app.services.pricing import compute_totals, format_eur
+from app.services.pricing import compute_totals, format_eur, shipping_zone
 
 
 def _cart(db, price="10.00", qty=1):
@@ -188,3 +189,77 @@ def test_coupon_schema_free_shipping_forces_value():
     with pytest.raises(ValidationError):
         CouponCreate(code="z", discount_type="percent", discount_value=Decimal("101"))
     assert CouponUpdate(is_active=False).discount_type is None
+
+
+# ── Zonas de envío: península / Baleares / presupuesto ─────────────────────
+
+def test_shipping_zone_by_postal_code():
+    assert shipping_zone("13005") == "peninsula"
+    assert shipping_zone(None) == "peninsula"
+    assert shipping_zone("07001") == "baleares"
+    assert shipping_zone(" 07720") == "baleares"
+    for cp in ("35001", "38001", "51001", "52001"):
+        assert shipping_zone(cp) == "quote"
+
+
+def test_baleares_shipping_has_no_free_threshold():
+    t30 = compute_totals(Decimal("30"), zone="baleares")
+    t60 = compute_totals(Decimal("60"), zone="baleares")
+    assert t30.shipping_cost == t60.shipping_cost == Decimal("7.95")
+    assert t60.total == Decimal("67.95")
+    assert t30.shipping_message == "Envío a Islas Baleares: 7,95 €"
+
+
+def test_baleares_free_shipping_coupon_voids_shipping(db):
+    coupon = _coupon(db)
+    t = compute_totals(Decimal("60"), coupon, zone="baleares")
+    assert t.coupon_applies and t.shipping_discount == Decimal("7.95")
+    assert t.shipping_cost == 0 and t.total == Decimal("60")
+    assert t.shipping_message == "Envío gratis con el cupón ENVIOGRATIS"
+
+
+def test_quote_zone_charges_no_shipping():
+    t = compute_totals(Decimal("30"), zone="quote")
+    assert t.shipping_cost == 0 and t.total == Decimal("30")
+    assert t.shipping_message == "Envío a Canarias, Ceuta y Melilla: presupuesto por WhatsApp"
+
+
+def test_peninsula_unchanged():
+    assert compute_totals(Decimal("30")).shipping_cost == Decimal("4.95")
+    assert compute_totals(Decimal("48"), zone="peninsula").shipping_cost == 0
+
+
+def _checkout_cp(cp):
+    return CheckoutCreate(shipping_address=AddressInput(
+        first_name="Ana", last_name="Pérez", street="Calle Mayor 1", city="X",
+        province=PROVINCES[cp[:2]], postal_code=cp, phone="600123456"))
+
+
+def test_validate_baleares_ok_and_quote_blocked(db):
+    user, cart, _ = _cart(db, "30.00", 1)
+    v = asyncio.run(validate_checkout(_checkout_cp("07001"), db, user, None, None))
+    assert v.is_valid and v.shipping_zone == "baleares"
+    assert v.shipping_cost == Decimal("7.95") and v.total == Decimal("37.95")
+    for cp in ("35001", "38001", "51001", "52001"):
+        v = asyncio.run(validate_checkout(_checkout_cp(cp), db, user, None, None))
+        assert not v.is_valid and v.shipping_zone == "quote"
+        assert v.errors == [QUOTE_ZONE_ERROR]
+    assert "WhatsApp" in QUOTE_ZONE_ERROR
+
+
+def test_shipping_cost_endpoint_by_postal_code(db):
+    user, cart, _ = _cart(db, "30.00", 1)
+    r = asyncio.run(get_shipping_cost(db, user, None, None, postal_code="07001"))
+    assert r.cost == Decimal("7.95") and r.shipping_zone == "baleares"
+    r = asyncio.run(get_shipping_cost(db, user, None, None))
+    assert r.cost == Decimal("4.95") and r.shipping_zone == "peninsula"
+
+
+def test_redemption_of_free_shipping_in_baleares_records_baleares_rate(db):
+    user, cart, _ = _cart(db)
+    coupon = _coupon(db)
+    order = Order(order_number="CC-2", status="paid", user_id=user.id, subtotal=Decimal("20"),
+                  shipping_cost=Decimal("0"), discount=Decimal("0"), tax=Decimal("0"),
+                  total=Decimal("20"), coupon_code="ENVIOGRATIS",
+                  shipping_address={"postal_code": "07001"})
+    assert _redeemed_amount(order, coupon) == Decimal("7.95")

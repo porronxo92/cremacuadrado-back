@@ -6,7 +6,7 @@ el PaymentIntent: lo que se muestra es lo que se cobra. Función pura, sin BD.
 """
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Optional
+from typing import Literal, Optional
 
 from app.config import settings
 
@@ -21,12 +21,29 @@ def format_eur(amount) -> str:
     return f"{text} €"
 
 
+ShippingZone = Literal["peninsula", "baleares", "quote"]
+
+
+def shipping_zone(postal_code: Optional[str]) -> ShippingZone:
+    """Zona de envío según el CP. Sin CP (carrito) se asume península."""
+    prefix = (postal_code or "").strip()[:2]
+    if prefix in settings.SHIPPING_BALEARES_POSTCODE_PREFIXES:
+        return "baleares"
+    if prefix in settings.SHIPPING_QUOTE_POSTCODE_PREFIXES:
+        return "quote"
+    return "peninsula"
+
+
 def _threshold() -> Decimal:
     return Decimal(str(settings.FREE_SHIPPING_THRESHOLD))
 
 
-def _shipping_base(amount_after_discount: Decimal) -> Decimal:
-    """Envío según el umbral de envío gratis (sobre subtotal - descuento)."""
+def _shipping_base(amount_after_discount: Decimal, zone: str = "peninsula") -> Decimal:
+    """Envío según zona y umbral de envío gratis (sobre subtotal - descuento)."""
+    if zone == "baleares":
+        return Decimal(str(settings.SHIPPING_COST_BALEARES))  # sin umbral gratis
+    if zone == "quote":
+        return Decimal("0")  # no se cobra: el pago se bloquea en validate
     if amount_after_discount >= _threshold():
         return Decimal("0")
     return Decimal(str(settings.SHIPPING_COST))
@@ -50,7 +67,7 @@ class Totals:
         return self.discount if self.discount > 0 else self.shipping_discount
 
 
-def _inapplicable(coupon, subtotal: Decimal, for_apply: bool) -> Optional[str]:
+def _inapplicable(coupon, subtotal: Decimal, for_apply: bool, zone: str = "peninsula") -> Optional[str]:
     """Motivo por el que el cupón no aplicaría a este subtotal (None si aplica)."""
     min_amount = Decimal(str(coupon.min_order_amount or 0))
     if subtotal < min_amount:
@@ -58,7 +75,7 @@ def _inapplicable(coupon, subtotal: Decimal, for_apply: bool) -> Optional[str]:
             f"Añade {format_eur(min_amount - subtotal)} más para usar el cupón "
             f"{coupon.code} (pedido mínimo {format_eur(min_amount)})."
         )
-    if coupon.discount_type == FREE_SHIPPING_TYPE and _shipping_base(subtotal) == 0:
+    if coupon.discount_type == FREE_SHIPPING_TYPE and _shipping_base(subtotal, zone) == 0:
         if for_apply:
             return (
                 f"Tu pedido ya tiene envío gratis (desde {format_eur(_threshold())}). "
@@ -73,7 +90,7 @@ def coupon_rejection_reason(coupon, subtotal: Decimal) -> Optional[str]:
     return _inapplicable(coupon, Decimal(subtotal), for_apply=True)
 
 
-def compute_totals(subtotal: Decimal, coupon=None) -> Totals:
+def compute_totals(subtotal: Decimal, coupon=None, zone: str = "peninsula") -> Totals:
     subtotal = Decimal(subtotal)
     discount = Decimal("0")
     shipping_discount = Decimal("0")
@@ -82,20 +99,24 @@ def compute_totals(subtotal: Decimal, coupon=None) -> Totals:
     coupon_message = None
 
     if coupon is not None and subtotal > 0:
-        coupon_message = _inapplicable(coupon, subtotal, for_apply=False)
+        coupon_message = _inapplicable(coupon, subtotal, for_apply=False, zone=zone)
         if coupon_message is None:
             coupon_applies = True
             if not is_shipping_coupon:
                 discount = coupon.calculate_discount(subtotal)
 
     after_discount = subtotal - discount
-    shipping_base = _shipping_base(after_discount)
+    shipping_base = _shipping_base(after_discount, zone)
     if coupon_applies and is_shipping_coupon:
         shipping_discount = shipping_base
     shipping_cost = shipping_base - shipping_discount
 
     if shipping_discount > 0:
         message = f"Envío gratis con el cupón {coupon.code}"
+    elif zone == "quote":
+        message = "Envío a Canarias, Ceuta y Melilla: presupuesto por WhatsApp"
+    elif zone == "baleares":
+        message = f"Envío a Islas Baleares: {format_eur(shipping_cost)}"
     elif shipping_cost == 0:
         message = "Envío gratis"
     else:

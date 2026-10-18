@@ -54,12 +54,17 @@ class Settings(BaseSettings):
     
     # Legal — versión vigente de los textos. Se guarda con cada aceptación /
     # consentimiento; súbela cuando cambie el texto publicado en el frontend.
-    TERMS_VERSION: str = "2026-10b"    # condiciones generales de venta
-    PRIVACY_VERSION: str = "2026-10"   # política de privacidad
+    TERMS_VERSION: str = "2026-10c"    # condiciones generales de venta
+    PRIVACY_VERSION: str = "2026-10b"  # política de privacidad
 
-    # Envíos: solo península (las CGV lo indican). Prefijos de CP excluidos:
-    # 07 Baleares, 35/38 Canarias, 51 Ceuta, 52 Melilla.
-    SHIPPING_EXCLUDED_POSTCODE_PREFIXES: list[str] = ["07", "35", "38", "51", "52"]
+    # Envíos: península (SHIPPING_COST, gratis desde el umbral) y Baleares (tarifa fija,
+    # sin umbral). Canarias, Ceuta y Melilla no se cobran por la web (aduanas):
+    # presupuesto por WhatsApp. CP: 07 Baleares, 35/38 Canarias, 51 Ceuta, 52 Melilla.
+    SHIPPING_COST_BALEARES: float = 7.95
+    SHIPPING_BALEARES_POSTCODE_PREFIXES: list[str] = ["07"]
+    SHIPPING_QUOTE_POSTCODE_PREFIXES: list[str] = ["35", "38", "51", "52"]
+    # WhatsApp de la tienda en formato wa.me (prefijo de país, sin + ni espacios)
+    WHATSAPP_PHONE: str = "34623924886"
     SHIPPING_ALLOWED_COUNTRIES: list[str] = ["ES", "España", "Espana", "Spain"]
 
     # Un carrito de usuario sin actividad durante más de estas horas deja de estar
