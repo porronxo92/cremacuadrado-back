@@ -62,10 +62,10 @@ class CachedStaticFiles(StaticFiles):
 def _cancel_ghost_orders() -> None:
     """Solo desarrollo local (APScheduler): en Vercel lo hace el cron."""
     from app.models.database import SessionLocal
-    from app.services.order_cleanup import cancel_ghost_orders
+    from app.services.order_cleanup import run_pending_order_jobs
     db = SessionLocal()
     try:
-        cancel_ghost_orders(db)
+        run_pending_order_jobs(db)
     except Exception as exc:
         db.rollback()
         logging.getLogger("cremacuadrado.scheduler").error("Ghost order cleanup failed: %s", exc, exc_info=True)
@@ -90,10 +90,10 @@ async def lifespan(app: FastAPI):
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         from app.services.correos.tracking import poll_active_shipments
         scheduler = AsyncIOScheduler()
-        scheduler.add_job(_cancel_ghost_orders, "interval", minutes=5, id="ghost_order_cleanup")
+        scheduler.add_job(_cancel_ghost_orders, "interval", minutes=15, id="ghost_order_cleanup")
         scheduler.add_job(poll_active_shipments, "interval", minutes=60, id="correos_tracking_poll")
         scheduler.start()
-        logger.info("Local scheduler started — ghost orders (5min) + tracking poll (60min)")
+        logger.info("Local scheduler started — pending orders (15min) + tracking poll (60min)")
         yield
         scheduler.shutdown(wait=False)
     except Exception as exc:

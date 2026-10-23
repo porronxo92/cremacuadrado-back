@@ -11,7 +11,7 @@ from fastapi import APIRouter, Header, HTTPException, status
 from app.api.deps import DbSession
 from app.config import settings
 from app.services.correos.tracking import poll_active_shipments
-from app.services.order_cleanup import cancel_ghost_orders
+from app.services.order_cleanup import run_pending_order_jobs
 from app.services.retention import purge
 
 logger = logging.getLogger("cremacuadrado.maintenance")
@@ -30,15 +30,18 @@ def run_purge(db: DbSession, authorization: str | None = Header(None)):
     """Purga diaria de datos que han superado su plazo de conservación (y pedidos fantasma)."""
     _check_cron_secret(authorization)
     deleted = purge(db)
-    deleted["ghost_orders_cancelled"] = cancel_ghost_orders(db)
+    jobs = run_pending_order_jobs(db)
+    deleted["payment_reminders_sent"] = jobs["reminders_sent"]
+    deleted["ghost_orders_cancelled"] = jobs["cancelled"]
     return {"status": "ok", "deleted": deleted}
 
 
 @router.get("/ghost-orders")
 def run_ghost_orders(db: DbSession, authorization: str | None = Header(None)):
-    """Cancela pedidos pending_payment caducados. En plan Pro: cron cada 15 min."""
+    """Recordatorio (24 h) y cancelación (48 h) de pedidos pending_payment. En plan Pro: cron cada 15 min."""
     _check_cron_secret(authorization)
-    return {"status": "ok", "cancelled": cancel_ghost_orders(db)}
+    jobs = run_pending_order_jobs(db)
+    return {"status": "ok", **jobs}
 
 
 @router.get("/poll-shipments")

@@ -727,6 +727,51 @@ class EmailService:
         return _send(to_email, f"Tu pedido {order_number} ya está en camino · CremaCuadrado", _wrap_layout(inner), mailbox="pedidos")
 
     @classmethod
+    def send_pending_payment_reminder(
+        cls, to_email: str, first_name: str, order_number: str, items: list, total: Decimal,
+    ) -> bool:
+        """Recordatorio de un pedido iniciado y sin pagar. Transaccional: sin cupones ni promociones."""
+        resume_url = f"{site_url()}/account/orders?pedido={quote(order_number, safe='')}"
+        rows = "".join(
+            f"""<tr>
+              <td style="padding:8px 0;border-bottom:1px solid #F0EBE1;font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;">{escape(str(i['name']))}</td>
+              <td style="padding:8px 0;border-bottom:1px solid #F0EBE1;font-family:Arial,sans-serif;font-size:14px;color:#6B6456;text-align:center;">x{i['qty']}</td>
+              <td style="padding:8px 0;border-bottom:1px solid #F0EBE1;font-family:Arial,sans-serif;font-size:14px;color:#1C1A14;text-align:right;">{Decimal(i['total']):.2f} €</td>
+            </tr>"""
+            for i in items
+        )
+        greeting = f"Hola {escape(first_name)}," if first_name else "Hola,"
+        inner = f"""
+          <h2 style="margin:0 0 12px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Tu pedido está pendiente de pago</h2>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+            {greeting} empezaste el pedido <strong>{escape(order_number)}</strong> y no llegaste a completar el pago.
+            No se ha hecho ningún cargo.
+          </p>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0;">{rows}</table>
+          <p style="font-family:Arial,sans-serif;font-size:16px;font-weight:700;color:#7B1716;">Total: {Decimal(total):.2f} € (IVA incluido)</p>
+          <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B6456;line-height:1.6;">
+            Si no lo completas en unas 24 horas, cancelaremos el pedido automáticamente.
+            Puedes retomarlo desde «Mis pedidos» con el botón «Continuar con el pago».
+          </p>
+          {_btn(resume_url, "Completar mi pedido")}
+          <p style="margin-top:24px;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
+            Si ya no lo quieres, no tienes que hacer nada. Si necesitas ayuda, escríbenos a
+            <a href="mailto:pedidos@cremacuadrado.com" style="color:#7B1716;">pedidos@cremacuadrado.com</a>.
+          </p>
+        """
+        text = (
+            f"{greeting} tu pedido {order_number} está pendiente de pago ({Decimal(total):.2f} €). "
+            f"Si no lo completas en unas 24 horas, lo cancelaremos. Complétalo aquí: {resume_url}"
+        )
+        return _send(
+            to_email,
+            f"Tu pedido {order_number} sigue pendiente de pago · CremaCuadrado",
+            _wrap_layout(inner),
+            text,
+            mailbox="pedidos",
+        )
+
+    @classmethod
     def send_payment_failed_email(
         cls, to_email: str, order_number: str, customer_name: str, error_message: Optional[str] = None
     ) -> bool:

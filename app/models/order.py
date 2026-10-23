@@ -46,6 +46,8 @@ class Order(Base):
     payment_method = Column(String(50), nullable=True)  # card, bizum, etc.
     payment_intent_id = Column(String(255), nullable=True)  # Stripe payment intent
     paid_at = Column(DateTime, nullable=True)
+    # Recordatorio de pago enviado (pedido abandonado) — 028_order_payment_reminder.sql
+    payment_reminder_sent_at = Column(DateTime, nullable=True)
     
     # Shipping
     tracking_number = Column(String(100), nullable=True)
@@ -121,6 +123,8 @@ Index("idx_orders_guest_email_lower", func.lower(Order.guest_email),
       postgresql_where=Order.user_id.is_(None))
 Index("idx_orders_user_coupon", Order.user_id, func.upper(Order.coupon_code),
       postgresql_where=Order.coupon_code.isnot(None))
+Index("idx_orders_pending_payment_created", Order.created_at,
+      postgresql_where=Order.status == "pending_payment")
 
 
 class OrderItem(Base):
