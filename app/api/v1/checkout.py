@@ -351,19 +351,44 @@ class PreConfirmResponse(Message):
 REPRICE_ERROR = "No hemos podido actualizar el importe del pedido. Inténtalo de nuevo."
 
 
-def _reprice_for_address(db: Session, order: Order, address) -> None:
+def _sync_order_coupon(db: Session, order: Order) -> bool:
     """
-    El pedido se creó con la dirección de ese momento. Si la zona de la dirección final
-    cambia el importe, recalcula pedido y PaymentIntent (mismo cálculo que validate).
-    Si Stripe falla no se guarda nada.
+    El cliente registrado puede aplicar o quitar el cupón en el propio checkout, después
+    de que se creara el pedido. Antes de cobrar, el pedido toma el cupón que tenga ahora
+    su cesta, con las mismas reglas que validate (vigente y no usado ya por el cliente).
+    Los invitados no tienen cupones. Devuelve True si el cupón del pedido ha cambiado.
+    """
+    if order.user_id is None:
+        return False
+    cart = db.query(Cart).filter(Cart.user_id == order.user_id).first()
+    code = ((cart.coupon_code if cart else None) or "").upper() or None
+    if code:
+        coupon = db.query(Coupon).filter(Coupon.code == code).first()
+        if not coupon or not coupon.is_valid or user_already_used(db, order.user_id, coupon.code):
+            code = None
+    if code == ((order.coupon_code or "").upper() or None):
+        return False
+    order.coupon_code = code
+    return True
+
+
+def _reprice_for_address(db: Session, order: Order, postal_code: Optional[str]) -> None:
+    """
+    El pedido se creó con la dirección y el cupón de ese momento. Si la zona de la
+    dirección final o el cupón cambian el importe, recalcula pedido y PaymentIntent
+    (mismo cálculo que validate). Si Stripe falla no se guarda nada.
     """
     coupon = None
     if order.coupon_code:
         coupon = db.query(Coupon).filter(Coupon.code == order.coupon_code.upper()).first()
         if coupon and not coupon.is_valid:
             coupon = None
-    totals = compute_totals(order.subtotal, coupon, shipping_zone(address.postal_code))
-    if totals.shipping_cost == order.shipping_cost and totals.total == order.total:
+    totals = compute_totals(order.subtotal, coupon, shipping_zone(postal_code))
+    # Como al crear el pedido: solo se registra el cupón si aplica
+    if not coupon or (totals.discount <= 0 and totals.shipping_discount <= 0):
+        order.coupon_code = None
+    if (totals.shipping_cost == order.shipping_cost and totals.total == order.total
+            and totals.discount == order.discount):
         return
 
     pi_id = order.payment_intent_id
@@ -419,6 +444,7 @@ def pre_confirm_order(data: CheckoutPreConfirm, request: Request, db: DbSession)
             status_code=status.HTTP_409_CONFLICT,
             detail="El pedido ya está pagado; los datos de facturación no se pueden cambiar",
         )
+    coupon_changed = _sync_order_coupon(db, order)
     if data.shipping_address is not None:
         address = data.shipping_address
         if address.country not in settings.SHIPPING_ALLOWED_COUNTRIES:
@@ -426,8 +452,10 @@ def pre_confirm_order(data: CheckoutPreConfirm, request: Request, db: DbSession)
                                 detail="De momento solo enviamos a España")
         if shipping_zone(address.postal_code) == "quote":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=QUOTE_ZONE_ERROR)
-        _reprice_for_address(db, order, address)
+        _reprice_for_address(db, order, address.postal_code)
         order.shipping_address = address.model_dump()
+    elif coupon_changed:
+        _reprice_for_address(db, order, (order.shipping_address or {}).get("postal_code"))
     if data.guest_email and order.user_id is None:
         order.guest_email = str(data.guest_email).lower()
     order.billing_address = data.billing.model_dump() if data.billing else None
