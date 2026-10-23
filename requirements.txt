@@ -1,7 +1,8 @@
 # FastAPI & Server
-fastapi==0.128.0
+fastapi==0.133.0
+starlette==1.3.1
 uvicorn[standard]==0.27.1
-python-multipart==0.0.20
+python-multipart==0.0.31
 
 # Database
 sqlalchemy==2.0.25
@@ -14,13 +15,13 @@ pydantic-settings==2.1.0
 email-validator==2.1.0.post1
 
 # Authentication
-PyJWT==2.10.1
+PyJWT==2.15.0
 bcrypt==4.3.0
 
 # Utils
 python-dateutil==2.8.2
 python-slugify==8.0.4
-sqladmin==0.21.0
+sqladmin==0.27.1
 
 # Payments
 stripe>=7.0.0
@@ -48,6 +49,6 @@ reportlab>=4.0.0
 tzdata>=2024.1
 
 # Development
-python-dotenv==1.0.1
+python-dotenv==1.2.2
 
 
