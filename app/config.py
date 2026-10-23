@@ -138,8 +138,11 @@ class Settings(BaseSettings):
     # Get it at: console.cloud.google.com → APIs & Services → Credentials
     GOOGLE_CLIENT_ID: str = ""
 
-    # Ghost order cleanup — cancel pending_payment orders older than this (minutes)
-    PENDING_ORDER_EXPIRE_MINUTES: int = 30
+    # Pedidos pending_payment abandonados: recordatorio a las 24 h, cancelación a las 48 h
+    PENDING_ORDER_REMINDER_HOURS: int = 24
+    PENDING_ORDER_EXPIRE_HOURS: int = 48
+    # Mínimo entre el recordatorio y la cancelación (clientes registrados)
+    PENDING_ORDER_MIN_HOURS_AFTER_REMINDER: int = 12
 
     # Vercel Blob — public store for product/blog images
     BLOB_PUBLIC_READ_WRITE_TOKEN: str = ""

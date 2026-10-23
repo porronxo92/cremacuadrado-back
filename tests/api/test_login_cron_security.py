@@ -102,7 +102,7 @@ def test_cron_endpoints_require_secret(client, monkeypatch, path):
 
 def test_ghost_orders_cron_cancels_only_expired_pending(client, db, monkeypatch):
     monkeypatch.setattr(settings, "CRON_SECRET", "s3cret")
-    _ghost(db, "CC-OLD", "pending_payment", settings.PENDING_ORDER_EXPIRE_MINUTES + 5)
+    _ghost(db, "CC-OLD", "pending_payment", settings.PENDING_ORDER_EXPIRE_HOURS * 60 + 5)
     _ghost(db, "CC-NEW", "pending_payment", 1)
     _ghost(db, "CC-PAID", "paid", 600)
     db.commit()

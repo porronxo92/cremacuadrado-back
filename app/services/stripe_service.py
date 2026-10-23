@@ -1,4 +1,5 @@
 """Stripe payment service."""
+import logging
 import stripe
 from typing import Optional
 from app.config import settings
@@ -67,3 +68,22 @@ def modify_payment_intent_amount(pi_id: str, amount: int) -> stripe.PaymentInten
     """Cambia el importe (céntimos) de un PaymentIntent aún sin confirmar."""
     s = _get_stripe()
     return s.PaymentIntent.modify(pi_id, amount=amount)
+
+
+def cancel_payment_intent_best_effort(pi_id: Optional[str]) -> bool:
+    """Cancela un PaymentIntent sin confirmar. Nunca lanza: devuelve False si falla
+    (sin clave, ya pagado/cancelado, error de red...)."""
+    if not pi_id or not settings.STRIPE_SECRET_KEY:
+        return False
+    try:
+        s = _get_stripe()
+        pi = s.PaymentIntent.retrieve(pi_id)
+        if pi.status in ("succeeded", "canceled", "processing"):
+            return False
+        s.PaymentIntent.cancel(pi_id)
+        return True
+    except Exception as exc:
+        logging.getLogger("cremacuadrado.stripe").warning(
+            "No se pudo cancelar el PaymentIntent %s: %s", pi_id, exc
+        )
+        return False

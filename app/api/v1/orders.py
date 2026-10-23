@@ -17,7 +17,7 @@ from app.models.product import Product
 from app.schemas.order import OrderResponse, OrderListResponse, OrderItemResponse
 from app.schemas.common import Message, PaginatedResponse
 from app.schemas.invoice import InvoiceSummary
-from app.services import invoicing
+from app.services import invoicing, stripe_service
 from app.services.email import send_invoice_email
 from app.utils.url import normalize_image_url
 from app.utils.signing import verify_invoice_token
@@ -142,19 +142,13 @@ def get_order(order_number: str, db: DbSession, current_user: CurrentUser):
     )
 
 
-@router.post("/{order_number}/reorder", response_model=Message)
-def reorder(order_number: str, db: DbSession, current_user: CurrentUser):
-    """Add items from a previous order to cart."""
-    order = db.query(Order).options(
-        joinedload(Order.items)
-    ).filter(
-        Order.order_number == order_number,
-        Order.user_id == current_user.id
-    ).first()
-
-    if not order:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
-
+def _add_order_items_to_cart(db, order: Order, user, replace: bool = False) -> tuple[int, list[str]]:
+    """
+    Mete las líneas de un pedido en el carrito del usuario (sin commit).
+    Salta variantes inactivas o sin stock y limita la cantidad al stock.
+    Con replace=True vacía antes el carrito y la cantidad es la del pedido (no suma).
+    Devuelve (líneas añadidas, nombres no disponibles).
+    """
     from app.models.product import ProductVariant
 
     # Batch-load variants and products for all order items
@@ -174,11 +168,16 @@ def reorder(order_number: str, db: DbSession, current_user: CurrentUser):
         ).all()
     }
 
-    cart = db.query(Cart).filter(Cart.user_id == current_user.id).first()
+    cart = db.query(Cart).filter(Cart.user_id == user.id).first()
     if not cart:
-        cart = Cart(user_id=current_user.id)
+        cart = Cart(user_id=user.id)
         db.add(cart)
         db.flush()
+
+    if replace:
+        db.query(CartItem).filter(CartItem.cart_id == cart.id).delete(synchronize_session=False)
+        db.expire(cart, ["items"])
+        cart.coupon_code = None
 
     cart_items_by_variant = {
         ci.product_variant_id: ci for ci in db.query(CartItem).filter(
@@ -188,7 +187,7 @@ def reorder(order_number: str, db: DbSession, current_user: CurrentUser):
     } if variant_ids else {}
 
     added_count = 0
-    unavailable = []
+    unavailable: list[str] = []
 
     for order_item in order.items:
         if not order_item.product_id or not order_item.product_variant_id:
@@ -211,15 +210,35 @@ def reorder(order_number: str, db: DbSession, current_user: CurrentUser):
         if existing_item:
             existing_item.quantity = min(existing_item.quantity + quantity_to_add, variant.stock)
         else:
-            db.add(CartItem(
+            new_item = CartItem(
                 cart_id=cart.id,
                 product_id=product.id,
                 product_variant_id=variant.id,
                 quantity=quantity_to_add,
                 price_at_add=variant.price,
-            ))
+            )
+            db.add(new_item)
+            cart_items_by_variant[variant.id] = new_item
 
         added_count += 1
+
+    return added_count, unavailable
+
+
+@router.post("/{order_number}/reorder", response_model=Message)
+def reorder(order_number: str, db: DbSession, current_user: CurrentUser):
+    """Add items from a previous order to cart."""
+    order = db.query(Order).options(
+        joinedload(Order.items)
+    ).filter(
+        Order.order_number == order_number,
+        Order.user_id == current_user.id
+    ).first()
+
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
+
+    added_count, unavailable = _add_order_items_to_cart(db, order, current_user)
 
     db.commit()
 
@@ -229,6 +248,45 @@ def reorder(order_number: str, db: DbSession, current_user: CurrentUser):
         message = f"Hemos añadido {added_count} productos al carrito"
 
     return Message(message=message)
+
+
+@router.post("/{order_number}/resume-payment")
+@limiter.limit("10/minute")
+def resume_payment(request: Request, order_number: str, db: DbSession, current_user: CurrentUser):
+    """
+    «Continuar con el pago» de un pedido pending_payment: devuelve sus líneas (y el
+    cupón) a la cesta, cancela el pedido viejo y su PaymentIntent, y el checkout
+    creará un pedido nuevo con los precios actuales.
+    """
+    order = _get_owned_order(db, order_number, current_user.id)
+    if order.status != "pending_payment":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Este pedido ya no está pendiente de pago",
+        )
+
+    added, skipped = _add_order_items_to_cart(db, order, current_user, replace=True)
+    if added == 0:
+        db.rollback()  # no se toca ni la cesta ni el pedido
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Los productos de este pedido ya no están disponibles. Puedes elegir otros en la tienda.",
+        )
+
+    cart = db.query(Cart).filter(Cart.user_id == current_user.id).first()
+    if order.coupon_code:
+        cart.coupon_code = order.coupon_code  # la validación normal del carrito decide si aplica
+    order.status = "cancelled"
+    payment_intent_id = order.payment_intent_id
+    db.commit()
+
+    # Evita un segundo cobro del pedido cancelado; si Stripe falla, no importa
+    stripe_service.cancel_payment_intent_best_effort(payment_intent_id)
+
+    message = f"Hemos devuelto {added} producto(s) a tu cesta"
+    if skipped:
+        message += f". No están disponibles: {', '.join(skipped)}"
+    return {"order_number": order.order_number, "items_added": added, "skipped": skipped, "message": message}
 
 
 @router.post("/{order_number}/cancel", response_model=Message)
