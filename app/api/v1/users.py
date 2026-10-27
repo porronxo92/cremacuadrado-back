@@ -3,7 +3,7 @@ Users API endpoints - Profile, Addresses.
 """
 import logging
 import re
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -21,6 +21,8 @@ from app.services.email import EmailService
 from app.services import consents
 from app.services.data_export import export_user_data
 from app.services.user_accounts import anonymize_user
+from app.services.legacy_customers import legacy_coupon_for, madrid_day
+from app.schemas.coupon import PersonalCouponResponse
 
 logger = logging.getLogger("cremacuadrado.users")
 
@@ -35,6 +37,18 @@ router = APIRouter()
 async def get_profile(current_user: CurrentUser):
     """Get current user's profile."""
     return current_user
+
+
+@router.get("/me/legacy-coupon", response_model=Optional[PersonalCouponResponse])
+def get_legacy_coupon(current_user: CurrentUser, db: DbSession):
+    """Cupón personal de cliente histórico (null si la cuenta no tiene)."""
+    coupon = legacy_coupon_for(db, current_user)
+    if coupon is None:
+        return None
+    return PersonalCouponResponse(
+        code=coupon.code, discount_value=coupon.discount_value, is_valid=coupon.is_valid,
+        valid_from=madrid_day(coupon.valid_from), valid_until=madrid_day(coupon.valid_until),
+    )
 
 
 @router.put("/profile", response_model=UserResponse)

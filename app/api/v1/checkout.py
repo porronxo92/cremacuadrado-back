@@ -24,7 +24,7 @@ from app.schemas.order import (
 )
 from app.schemas.common import Message
 from app.services import consents, stripe_service
-from app.services.coupon_redemptions import user_already_used
+from app.services.coupon_redemptions import user_coupon_error
 from app.services.pricing import compute_totals, shipping_zone
 from app.limiter import limiter
 from app.utils.site import request_site_url
@@ -72,7 +72,7 @@ async def get_shipping_cost(
             Coupon.code == cart.coupon_code,
             Coupon.is_active == True
         ).first()
-        if coupon and not coupon.is_valid:
+        if coupon and (not coupon.is_valid or (coupon.user_id is not None and coupon.user_id != current_user.id)):
             coupon = None
 
     zone = shipping_zone(postal_code)
@@ -174,8 +174,8 @@ async def validate_checkout(
             if not coupon or not coupon.is_valid:
                 errors.append("Cupón no válido o expirado")
                 coupon = None
-            elif user_already_used(db, current_user.id, coupon.code):
-                errors.append("Este cupón ya fue utilizado en un pedido anterior")
+            elif (user_error := user_coupon_error(db, coupon, current_user.id)):
+                errors.append(user_error)
                 coupon = None
 
     # Un cupón que no aplica (mínimo, envío ya gratis) no bloquea: simplemente no descuenta
@@ -364,7 +364,7 @@ def _sync_order_coupon(db: Session, order: Order) -> bool:
     code = ((cart.coupon_code if cart else None) or "").upper() or None
     if code:
         coupon = db.query(Coupon).filter(Coupon.code == code).first()
-        if not coupon or not coupon.is_valid or user_already_used(db, order.user_id, coupon.code):
+        if not coupon or not coupon.is_valid or user_coupon_error(db, coupon, order.user_id):
             code = None
     if code == ((order.coupon_code or "").upper() or None):
         return False

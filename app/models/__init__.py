@@ -9,6 +9,7 @@ from app.models.point_of_sale import PointOfSale
 from app.models.shipment import Shipment, ShipmentEvent
 from app.models.blog import BlogPost, BlogCategory
 from app.models.lead import NewsletterLead
+from app.models.legacy_customer import LegacyCustomer
 from app.models.pos_lead import PosLead
 from app.models.contact_lead import ContactLead
 from app.models.invoice import Invoice, InvoiceSequence
@@ -41,6 +42,7 @@ __all__ = [
     "BlogPost",
     "BlogCategory",
     "NewsletterLead",
+    "LegacyCustomer",
     "PosLead",
     "ContactLead",
     "Invoice",

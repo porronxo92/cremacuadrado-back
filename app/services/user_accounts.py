@@ -10,8 +10,9 @@ from app.models.cart import Cart
 from app.models.compliance import ConsentRecord
 from app.models.contact_lead import ContactLead
 from app.models.lead import NewsletterLead
+from app.models.legacy_customer import LegacyCustomer
 from app.models.invoice import Invoice
-from app.models.order import Order
+from app.models.order import Coupon, Order
 from app.models.pos_lead import PosLead
 from app.models.user import Address, EmailVerificationToken, PasswordResetToken, User
 
@@ -93,11 +94,16 @@ def anonymize_user(db: Session, user: User) -> None:
     db.query(EmailVerificationToken).filter(EmailVerificationToken.user_id == user.id).delete(synchronize_session=False)
     for cart in db.query(Cart).filter(Cart.user_id == user.id).all():
         db.delete(cart)
+    # Cupones personales (cliente histórico): se desactivan; los pedidos guardan su propio código
+    db.query(Coupon).filter(Coupon.user_id == user.id).update(
+        {Coupon.is_active: False}, synchronize_session=False,
+    )
 
     if original_email:
         db.query(NewsletterLead).filter(NewsletterLead.email == original_email).delete(synchronize_session=False)
         db.query(ContactLead).filter(ContactLead.email == original_email).delete(synchronize_session=False)
         db.query(PosLead).filter(PosLead.email == original_email).delete(synchronize_session=False)
+        db.query(LegacyCustomer).filter(LegacyCustomer.email == original_email).delete(synchronize_session=False)
         # El rastro de consentimientos se mantiene, pero ligado a la cuenta anonimizada
         db.query(ConsentRecord).filter(ConsentRecord.subject_email == original_email).update(
             {ConsentRecord.user_id: user.id}, synchronize_session=False,

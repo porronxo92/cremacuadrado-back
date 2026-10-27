@@ -588,6 +588,31 @@ class EmailService:
         return _send(to_email, "Bienvenido a CremaCuadrado", _wrap_layout(inner))
 
     @classmethod
+    def send_legacy_welcome_email(cls, to_email: str, first_name: str, coupon_code: str,
+                                  valid_from: datetime, valid_until: datetime) -> bool:
+        """Bienvenida de los clientes de la web antigua, con su cupón personal del 20 % (services/legacy_customers.py)."""
+        since = _madrid(valid_from).strftime("%d/%m/%Y")
+        until = _madrid(valid_until).strftime("%d/%m/%Y")
+        inner = f"""
+          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Gracias por seguir con nosotros, {escape(first_name or "")}</h2>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+            Ya nos compraste en nuestra web anterior y queremos agradecértelo. Con tu cuenta en la nueva tienda tienes
+            un <strong>20% de descuento en todos tus pedidos durante un año</strong>, del {since} al {until}.
+          </p>
+          <div style="margin:24px 0;padding:20px;background-color:#F4F1E9;border-radius:6px;text-align:center;border:1px dashed #7B1716;">
+            <p style="margin:0 0 4px;font-family:Arial,sans-serif;font-size:12px;color:#6B6456;text-transform:uppercase;letter-spacing:1px;">Tu código personal</p>
+            <p style="margin:0;font-family:Arial,sans-serif;font-size:24px;font-weight:700;color:#7B1716;letter-spacing:3px;">{escape(coupon_code)}</p>
+            <p style="margin:8px 0 0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">Válido del {since} al {until}</p>
+          </div>
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+            Aplícalo en el carrito con la sesión iniciada. Solo funciona en tu cuenta, lo puedes usar en todos los pedidos que quieras y no se acumula con otros códigos.
+            También lo tienes en «Mi cuenta → Mis datos».
+          </p>
+          {_btn(site_url() + "/tienda", "Ir a la tienda")}
+        """
+        return _send(to_email, "Tu 20% de cliente de siempre · CremaCuadrado", _wrap_layout(inner))
+
+    @classmethod
     def send_newsletter_confirmation_email(cls, to_email: str, confirm_url: str) -> bool:
         """Doble opt-in: el alta solo es efectiva cuando la persona confirma su email."""
         inner = f"""
@@ -1026,14 +1051,21 @@ class EmailService:
         )
 
     @classmethod
-    def send_email_verification(cls, to_email: str, first_name: str, token: str) -> bool:
-        """Send email address verification link."""
+    def send_email_verification(cls, to_email: str, first_name: str, token: str, legacy_benefit: bool = False) -> bool:
+        """Send email address verification link (legacy_benefit: cliente de la web antigua, ver legacy_customers.py)."""
         verify_url = f"{site_url()}/auth/verify-email?token={token}"
+        legacy = ""
+        if legacy_benefit:
+            legacy = """
+          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
+            Como ya eras cliente de nuestra web anterior, te espera un <strong>20% de descuento en todos tus pedidos durante un año</strong>.
+            Te enviamos tu código personal en cuanto verifiques el email.
+          </p>"""
         inner = f"""
           <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Verifica tu email</h2>
           <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
             Hola <strong>{escape(first_name or "")}</strong>, pulsa el botón para verificar tu dirección de email. El enlace caduca en 24 horas.
-          </p>
+          </p>{legacy}
           {_btn(verify_url, "Verificar email")}
           <p style="margin-top:24px;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">
             Si no te has registrado en CremaCuadrado, ignora este email.

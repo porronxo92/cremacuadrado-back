@@ -22,7 +22,9 @@ from app.models.pos_lead import PosLead
 from app.schemas.common import Message, PaginatedResponse
 from app.schemas.coupon import (
     CouponAdminResponse, CouponCreate, CouponRedemptionItem, CouponUpdate,
+    LegacyProgramResponse, LegacyProgramUpdate,
 )
+from app.services import legacy_customers
 from app.schemas.point_of_sale import (
     PointOfSaleAdminResponse, PointOfSaleCreate, PointOfSaleUpdate,
 )
@@ -246,6 +248,26 @@ def delete_coupon(coupon_id: int, db: DbSession, admin_user: AdminUser):
     db.delete(coupon)
     db.commit()
     return Message(message="Cupón eliminado")
+
+
+def _legacy_program_response(db) -> LegacyProgramResponse:
+    program = legacy_customers.get_program(db)
+    return LegacyProgramResponse(starts_on=program.starts_on, ends_on=program.ends_on,
+                                 **legacy_customers.program_stats(db))
+
+
+@router.get("/legacy-program", response_model=LegacyProgramResponse)
+def get_legacy_program(db: DbSession, admin_user: AdminUser):
+    """Periodo del 20 % de clientes históricos y cuántos lo tienen ya."""
+    return _legacy_program_response(db)
+
+
+@router.put("/legacy-program", response_model=LegacyProgramResponse)
+def update_legacy_program(data: LegacyProgramUpdate, db: DbSession, admin_user: AdminUser):
+    """Cambia el periodo y lo aplica también a los cupones ya concedidos."""
+    legacy_customers.update_program(db, data.starts_on, data.ends_on)
+    db.commit()
+    return _legacy_program_response(db)
 
 
 # =============================================================================

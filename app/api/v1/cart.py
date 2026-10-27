@@ -13,7 +13,7 @@ from app.api.deps import DbSession, CurrentUserOptional
 from app.models.cart import Cart, CartItem
 from app.models.product import Product, ProductVariant
 from app.models.order import Coupon
-from app.services.coupon_redemptions import user_already_used
+from app.services.coupon_redemptions import user_coupon_error
 from app.services.pricing import compute_totals, coupon_rejection_reason
 from app.models.user import User
 from app.schemas.cart import (
@@ -161,8 +161,8 @@ def cart_to_response(cart: Cart, db: Session) -> CartResponse:
         ).first()
         if coupon and coupon.is_valid:
             # Per-user check: remove the coupon if this user already completed
-            # an order with it (prevents reuse of single-use welcome coupons).
-            if user_already_used(db, cart.user_id, cart.coupon_code):
+            # an order with it (single-use coupons) or it is someone else's personal coupon.
+            if user_coupon_error(db, coupon, cart.user_id):
                 cart.coupon_code = None
                 db.commit()
                 coupon = None
@@ -389,11 +389,9 @@ def apply_coupon(
     if reason:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=reason)
 
-    if user_already_used(db, current_user.id, coupon.code):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Este cupón ya fue utilizado en un pedido anterior"
-        )
+    user_error = user_coupon_error(db, coupon, current_user.id)
+    if user_error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=user_error)
 
     cart.coupon_code = coupon.code
     db.commit()

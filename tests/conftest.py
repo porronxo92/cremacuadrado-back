@@ -31,6 +31,7 @@ from app.models.cart import Cart, CartItem  # noqa: E402
 from app.models.compliance import AdminAuditLog, ConsentRecord, PriceHistory, WithdrawalRequest  # noqa: E402
 from app.models.contact_lead import ContactLead  # noqa: E402
 from app.models.lead import NewsletterLead  # noqa: E402
+from app.models.legacy_customer import LegacyCustomer, LegacyProgram  # noqa: E402
 from app.models.pos_lead import PosLead  # noqa: E402
 from app.models.product import Category, Product, ProductImage, ProductVariant, Review  # noqa: E402
 from app.models.payment import StripeWebhookEvent  # noqa: E402
@@ -60,6 +61,8 @@ _TABLES = [
     ConsentRecord.__table__,
     AdminAuditLog.__table__,
     NewsletterLead.__table__,
+    LegacyCustomer.__table__,
+    LegacyProgram.__table__,
     ContactLead.__table__,
     PosLead.__table__,
 ]

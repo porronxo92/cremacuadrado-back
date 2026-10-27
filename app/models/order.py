@@ -171,6 +171,9 @@ class Coupon(Base):
     valid_from = Column(DateTime, nullable=True)
     valid_until = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
+    # Cupón personal: solo lo puede aplicar esa cuenta (029_legacy_customers.sql)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    reusable = Column(Boolean, default=False, nullable=False)  # False = un solo uso por cliente
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
     # Constraints

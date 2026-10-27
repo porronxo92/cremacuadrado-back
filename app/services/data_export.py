@@ -11,6 +11,7 @@ from app.models.compliance import ConsentRecord, WithdrawalRequest
 from app.models.contact_lead import ContactLead
 from app.models.invoice import Invoice
 from app.models.lead import NewsletterLead
+from app.models.legacy_customer import LegacyCustomer
 from app.models.order import Order
 from app.models.pos_lead import PosLead
 from app.models.product import Review
@@ -74,6 +75,11 @@ def export_user_data(db: Session, user: User) -> dict:
         "newsletter": [
             _row(n, ["email", "source", "coupon_code", "consent_at", "confirmed_at", "unsubscribed_at", "created_at"])
             for n in db.query(NewsletterLead).filter(NewsletterLead.email == email).all()
+        ],
+        "legacy_customer": [
+            _row(lc, ["email", "first_name", "source", "benefit_granted_at", "created_at"])
+            | {"coupon_code": lc.coupon.code if lc.coupon else None}
+            for lc in db.query(LegacyCustomer).filter(LegacyCustomer.email == email).all()
         ],
         "contact_messages": [
             _row(c, ["name", "email", "message", "accepts_marketing", "created_at"])

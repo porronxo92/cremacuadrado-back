@@ -1,5 +1,5 @@
 """Coupon (discount code) schemas for admin management."""
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -97,3 +97,30 @@ class CouponRedemptionItem(BaseModel):
     discount_amount: Decimal
     reverted_at: Optional[datetime] = None
     created_at: datetime
+
+
+class PersonalCouponResponse(BaseModel):
+    """Cupón de cliente histórico mostrado en «Mi cuenta → Mis datos»."""
+
+    code: str
+    discount_value: Decimal
+    valid_from: Optional[date] = None   # día en hora peninsular
+    valid_until: Optional[date] = None  # último día incluido, hora peninsular
+    is_valid: bool
+
+
+class LegacyProgramUpdate(BaseModel):
+    """Periodo de la promoción de clientes históricos (hora peninsular, ambos días incluidos)."""
+    starts_on: date
+    ends_on: date
+
+    @model_validator(mode="after")
+    def check_dates(self):
+        if self.ends_on < self.starts_on:
+            raise ValueError("La fecha de fin es anterior a la de inicio")
+        return self
+
+
+class LegacyProgramResponse(LegacyProgramUpdate):
+    customers: int  # emails cargados
+    granted: int    # cupones ya concedidos

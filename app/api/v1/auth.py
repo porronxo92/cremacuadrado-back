@@ -27,6 +27,7 @@ from app.utils.security import (
 )
 from app.services import consents, login_throttle
 from app.services.user_accounts import link_guest_orders
+from app.services.legacy_customers import find_legacy_customer, grant_legacy_benefit
 from app.services.email import EmailService
 from app.config import settings
 
@@ -92,11 +93,14 @@ async def register(request: Request, user_data: UserCreate, db: DbSession):
     db.commit()
 
     logger.info("New user registered: email=%s", user.email)
-    if not EmailService.send_welcome_email(user.email, user.first_name):
-        logger.error("Welcome email failed: email=%s", user.email)
-    else:
-        logger.info("Welcome email sent: email=%s", user.email)
-    if not EmailService.send_email_verification(user.email, user.first_name, ev_token.token):
+    # Cliente de la web antigua: su bienvenida (con el cupón) llega al verificar el email
+    is_legacy = find_legacy_customer(db, user.email) is not None
+    if not is_legacy:
+        if not EmailService.send_welcome_email(user.email, user.first_name):
+            logger.error("Welcome email failed: email=%s", user.email)
+        else:
+            logger.info("Welcome email sent: email=%s", user.email)
+    if not EmailService.send_email_verification(user.email, user.first_name, ev_token.token, legacy_benefit=is_legacy):
         logger.error("Verification email failed: email=%s", user.email)
     else:
         logger.info("Verification email sent: email=%s", user.email)
@@ -162,6 +166,8 @@ async def login(request: Request, credentials: UserLogin, db: DbSession):
     # Cuentas que verificaron su email antes de existir la vinculación
     link_guest_orders(db, user)
     db.commit()
+    # Cuentas verificadas antes de cargar la lista de clientes históricos (o email fallido)
+    grant_legacy_benefit(db, user)
 
     logger.info("Login success: email=%s role=%s", user.email, user.role)
     token_version = getattr(user, "token_version", 0)
@@ -239,10 +245,12 @@ async def google_auth(request: Request, data: GoogleAuthRequest, db: DbSession):
             lead.converted_at = datetime.now(timezone.utc)
             db.commit()
 
-        if not EmailService.send_welcome_email(user.email, user.first_name):
-            logger.error("Google welcome email failed: email=%s", user.email)
-        else:
-            logger.info("Google welcome email sent: email=%s", user.email)
+        # Cliente de la web antigua: su bienvenida especial la envía grant_legacy_benefit más abajo
+        if not find_legacy_customer(db, user.email):
+            if not EmailService.send_welcome_email(user.email, user.first_name):
+                logger.error("Google welcome email failed: email=%s", user.email)
+            else:
+                logger.info("Google welcome email sent: email=%s", user.email)
 
     if not user.is_active:
         raise HTTPException(
@@ -254,6 +262,7 @@ async def google_auth(request: Request, data: GoogleAuthRequest, db: DbSession):
     # Google garantiza el email verificado (se marcó arriba): vincula pedidos de invitado
     link_guest_orders(db, user)
     db.commit()
+    grant_legacy_benefit(db, user)
 
     token_version = getattr(user, "token_version", 0)
     access_token = create_access_token(user.id, token_version)
@@ -414,5 +423,6 @@ async def verify_email(token: str, db: DbSession):
     # Email demostrado: ahora sí se vinculan los pedidos de invitado con ese email
     link_guest_orders(db, ev_token.user)
     db.commit()
+    grant_legacy_benefit(db, ev_token.user)
 
     return Message(message="Email verificado")

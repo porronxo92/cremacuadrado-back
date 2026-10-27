@@ -30,6 +30,19 @@ def user_already_used(db: Session, user_id: int, code: str) -> bool:
     ).first() is not None
 
 
+def user_coupon_error(db: Session, coupon: Coupon, user_id: int) -> str | None:
+    """
+    Reglas por cliente: un cupón personal (`user_id`) solo vale para su dueño y uno
+    `reusable` se puede usar en varios pedidos; el resto, una vez por cliente.
+    Devuelve el motivo del rechazo o None si el cliente puede usarlo.
+    """
+    if coupon.user_id is not None and coupon.user_id != user_id:
+        return "Este cupón es personal y no está asociado a tu cuenta"
+    if not coupon.reusable and user_already_used(db, user_id, coupon.code):
+        return "Este cupón ya fue utilizado en un pedido anterior"
+    return None
+
+
 def _redeemed_amount(order: Order, coupon: Coupon | None):
     """
     Importe descontado. En free_shipping el pedido guarda discount=0 y envío=0, así que
