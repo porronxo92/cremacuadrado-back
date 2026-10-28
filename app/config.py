@@ -46,9 +46,42 @@ class Settings(BaseSettings):
     SHIPPING_COST: float = 4.95
     FREE_SHIPPING_THRESHOLD: float = 48.0
     
-    # Tax
-    TAX_RATE: float = 0.21  # 21% IVA
+    # Tax — IVA reducido de alimentación (10 %). El envío, como prestación accesoria,
+    # tributa al mismo tipo que el producto. El tipo aplicado se guarda en cada
+    # pedido (orders.tax_rate) y en cada factura, así que cambiarlo aquí no altera
+    # facturas ya emitidas.
+    TAX_RATE: float = 0.10
     
+    # Legal — versión vigente de los textos. Se guarda con cada aceptación /
+    # consentimiento; súbela cuando cambie el texto publicado en el frontend.
+    TERMS_VERSION: str = "2026-10c"    # condiciones generales de venta
+    PRIVACY_VERSION: str = "2026-10b"  # política de privacidad
+
+    # Envíos: península (SHIPPING_COST, gratis desde el umbral) y Baleares (tarifa fija,
+    # sin umbral). Canarias, Ceuta y Melilla no se cobran por la web (aduanas):
+    # presupuesto por WhatsApp. CP: 07 Baleares, 35/38 Canarias, 51 Ceuta, 52 Melilla.
+    SHIPPING_COST_BALEARES: float = 7.95
+    SHIPPING_BALEARES_POSTCODE_PREFIXES: list[str] = ["07"]
+    SHIPPING_QUOTE_POSTCODE_PREFIXES: list[str] = ["35", "38", "51", "52"]
+    # WhatsApp de la tienda en formato wa.me (prefijo de país, sin + ni espacios)
+    WHATSAPP_PHONE: str = "34623924886"
+    SHIPPING_ALLOWED_COUNTRIES: list[str] = ["ES", "España", "Espana", "Spain"]
+
+    # Un carrito de usuario sin actividad durante más de estas horas deja de estar
+    # "vigente": al volver a iniciar sesión se vacía en vez de recuperarse.
+    USER_CART_TTL_HOURS: int = 48
+
+    # Conservación de datos (días) — ver app/services/retention.py
+    RETENTION_GUEST_CART_DAYS: int = 30
+    RETENTION_UNCONFIRMED_LEAD_DAYS: int = 30       # newsletter sin confirmar (doble opt-in)
+    RETENTION_LEAD_DAYS: int = 730                  # leads B2B / newsletter sin conversión
+    RETENTION_CONTACT_DAYS: int = 365
+    RETENTION_WEBHOOK_EVENT_DAYS: int = 365
+    RETENTION_AUDIT_LOG_DAYS: int = 730
+
+    # Vercel Cron — Vercel envía "Authorization: Bearer <CRON_SECRET>"
+    CRON_SECRET: str = ""
+
     # Pagination
     DEFAULT_PAGE_SIZE: int = 12
     MAX_PAGE_SIZE: int = 100
@@ -105,11 +138,26 @@ class Settings(BaseSettings):
     # Get it at: console.cloud.google.com → APIs & Services → Credentials
     GOOGLE_CLIENT_ID: str = ""
 
-    # Ghost order cleanup — cancel pending_payment orders older than this (minutes)
-    PENDING_ORDER_EXPIRE_MINUTES: int = 30
+    # Pedidos pending_payment abandonados: recordatorio a las 24 h, cancelación a las 48 h
+    PENDING_ORDER_REMINDER_HOURS: int = 24
+    PENDING_ORDER_EXPIRE_HOURS: int = 48
+    # Mínimo entre el recordatorio y la cancelación (clientes registrados)
+    PENDING_ORDER_MIN_HOURS_AFTER_REMINDER: int = 12
 
     # Vercel Blob — public store for product/blog images
     BLOB_PUBLIC_READ_WRITE_TOKEN: str = ""
+
+    # Vercel Blob — PRIVATE store "cremacuadrado-invoices" (facturas en PDF).
+    # Nunca se exponen URLs: el backend descarga el PDF con el token y lo sirve.
+    BLOB_INVOICE_READ_WRITE_TOKEN: str = ""
+    BLOB_INVOICE_STORE_ID: str = ""  # opcional si el token ya incluye el store id
+    BLOB_INVOICE_WEBHOOK_PUBLIC_KEY: str = ""  # reservado (webhooks del store), sin uso
+    # Carpeta raíz de los PDF en el store. Vacío = según VERCEL_ENV:
+    # production → invoices_prod, preview → invoices_stg, resto → invoices_dev.
+    # Staging y producción comparten store y numeración (F2026-000001 existe en
+    # las dos BD): sin carpetas separadas un entorno sobrescribiría al otro.
+    BLOB_INVOICE_PREFIX: str = ""
+    VERCEL_ENV: str = ""  # lo define Vercel: production | preview | development
 
     # Security headers
     SECURE_HEADERS: bool = True  # Set False only for local dev if needed

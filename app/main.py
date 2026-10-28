@@ -26,10 +26,13 @@ from app.config import settings
 from app.logging_config import setup_logging, request_id_ctx
 from app.limiter import limiter
 from app.services import blob_service
+from app.services.audit import audit_admin_requests
+from app.utils.site import capture_site_url
 
 setup_logging(debug=settings.DEBUG)
 logger = logging.getLogger("cremacuadrado")
 from app.api.v1 import router as api_v1_router
+import app.services.price_history  # noqa: F401,E402 — registra el historial de precios (Omnibus)
 from app.models.database import engine, Base
 from app.sqladmin_config import (
     AdminAuth,
@@ -38,7 +41,7 @@ from app.sqladmin_config import (
     ProductImageAdmin, ProductNutritionAdmin, ReviewAdmin,
     CartAdmin, CartItemAdmin,
     OrderAdmin, OrderItemAdmin, CouponAdmin,
-    PaymentIntentAdmin, StripeWebhookEventAdmin, RefundAdmin,
+    PaymentIntentAdmin, StripeWebhookEventAdmin, RefundAdmin, InvoiceAdmin,
     BlogCategoryAdmin, BlogPostAdmin,
     PointOfSaleAdmin,
 )
@@ -57,25 +60,15 @@ class CachedStaticFiles(StaticFiles):
 
 
 def _cancel_ghost_orders() -> None:
-    """Cancel pending_payment orders that have been waiting longer than the configured threshold."""
-    from app.models.order import Order
+    """Solo desarrollo local (APScheduler): en Vercel lo hace el cron."""
     from app.models.database import SessionLocal
-    _log = logging.getLogger("cremacuadrado.scheduler")
+    from app.services.order_cleanup import run_pending_order_jobs
     db = SessionLocal()
     try:
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.PENDING_ORDER_EXPIRE_MINUTES)
-        expired = db.query(Order).filter(
-            Order.status == "pending_payment",
-            Order.created_at < cutoff,
-        ).all()
-        if expired:
-            for order in expired:
-                order.status = "cancelled"
-            db.commit()
-            _log.info("Ghost orders cancelled", extra={"count": len(expired)})
+        run_pending_order_jobs(db)
     except Exception as exc:
         db.rollback()
-        _log.error("Ghost order cleanup failed: %s", exc, exc_info=True)
+        logging.getLogger("cremacuadrado.scheduler").error("Ghost order cleanup failed: %s", exc, exc_info=True)
     finally:
         db.close()
 
@@ -85,18 +78,26 @@ async def lifespan(app: FastAPI):
     """Application lifespan events."""
     logger.info("%s v%s starting", settings.APP_NAME, settings.APP_VERSION)
 
+    # En Vercel (serverless) no hay procesos persistentes: las tareas periódicas van
+    # por Vercel Cron (backend/vercel.json → /api/v1/maintenance/*). APScheduler solo
+    # arranca en desarrollo local, para no duplicar ejecuciones en producción.
+    if os.environ.get("VERCEL") or not settings.DEBUG:
+        yield
+        logger.info("Shutting down")
+        return
+
     try:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         from app.services.correos.tracking import poll_active_shipments
         scheduler = AsyncIOScheduler()
-        scheduler.add_job(_cancel_ghost_orders, "interval", minutes=5, id="ghost_order_cleanup")
+        scheduler.add_job(_cancel_ghost_orders, "interval", minutes=15, id="ghost_order_cleanup")
         scheduler.add_job(poll_active_shipments, "interval", minutes=60, id="correos_tracking_poll")
         scheduler.start()
-        logger.info("Scheduler started — ghost orders (5min) + tracking poll (60min)")
+        logger.info("Local scheduler started — pending orders (15min) + tracking poll (60min)")
         yield
         scheduler.shutdown(wait=False)
     except Exception as exc:
-        logger.warning("Scheduler could not start (serverless?): %s", exc)
+        logger.warning("Scheduler could not start: %s", exc)
         yield
 
     logger.info("Shutting down")
@@ -143,6 +144,7 @@ _sqladmin.add_view(CouponAdmin)
 _sqladmin.add_view(PaymentIntentAdmin)
 _sqladmin.add_view(StripeWebhookEventAdmin)
 _sqladmin.add_view(RefundAdmin)
+_sqladmin.add_view(InvoiceAdmin)
 _sqladmin.add_view(BlogCategoryAdmin)
 _sqladmin.add_view(BlogPostAdmin)
 _sqladmin.add_view(PointOfSaleAdmin)
@@ -277,10 +279,28 @@ async def cart_session_middleware(request: Request, call_next):
     return response
 
 
+# CSP: el API solo devuelve JSON/PDF, así que no necesita cargar nada. El panel
+# SQLAdmin (/admin) sirve HTML con sus propios estáticos (y CDN de jsDelivr).
+_API_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+_ADMIN_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+    "font-src 'self' data: https://cdn.jsdelivr.net https://fonts.gstatic.com; "
+    "img-src 'self' data: https:; connect-src 'self'; "
+    "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+)
+
+
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     """Add security headers to every response."""
     response = await call_next(request)
+    path = request.url.path
+    if "content-security-policy" not in response.headers and not path.startswith("/static"):
+        response.headers["Content-Security-Policy"] = (
+            _ADMIN_CSP if path.startswith("/admin") else _API_CSP
+        )
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
@@ -289,6 +309,11 @@ async def add_security_headers(request: Request, call_next):
     if not settings.DEBUG:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
     return response
+
+# Registro de accesos al API de administración (RGPD art. 32)
+app.middleware("http")(audit_admin_requests)
+# URL del frontend que hace la petición (enlaces correctos en los emails por entorno)
+app.middleware("http")(capture_site_url)
 
 # Include API routers
 app.include_router(api_v1_router, prefix="/api/v1")
@@ -317,7 +342,7 @@ async def admin_upload(
     dest_path: str = Form("misc"),
 ):
     """Upload an image from the SQLAdmin panel (session-authenticated) to Vercel Blob."""
-    if request.session.get("token") != "authenticated":
+    if not await _admin_auth.authenticate(request):
         return JSONResponse({"error": "No autorizado"}, status_code=403)
 
     ext = os.path.splitext(file.filename or "")[1].lower()

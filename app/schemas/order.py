@@ -2,7 +2,9 @@
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List
-from pydantic import BaseModel, Field, EmailStr, field_validator
+from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
+
+from app.utils.spain import canonical_province, normalize_phone
 
 
 # =============================================================================
@@ -15,6 +17,7 @@ class ShippingCostResponse(BaseModel):
     free_shipping_threshold: Decimal
     amount_for_free_shipping: Optional[Decimal]
     message: Optional[str]
+    shipping_zone: str = "peninsula"  # peninsula | baleares | quote
 
 
 # =============================================================================
@@ -50,6 +53,57 @@ class AddressInput(BaseModel):
     country: str = Field(default="España", max_length=100)
     phone: str = Field(..., min_length=9, max_length=20)
 
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v: str) -> str:
+        return normalize_phone(v)
+
+    @model_validator(mode="after")
+    def _province_matches_postcode(self):
+        self.province = canonical_province(self.province, self.postal_code)
+        return self
+
+
+class BillingInput(BaseModel):
+    """Datos fiscales para factura completa (empresa / autónomo)."""
+    name: str = Field(..., min_length=2, max_length=200)  # razón social o nombre completo
+    nif: str = Field(..., min_length=8, max_length=15)
+    street: str = Field(..., min_length=1, max_length=255)
+    street_2: Optional[str] = Field(None, max_length=255)
+    city: str = Field(..., min_length=1, max_length=100)
+    province: str = Field(..., min_length=1, max_length=100)
+    postal_code: str = Field(..., min_length=4, max_length=10)
+    country: str = Field(default="España", max_length=100)
+
+    @model_validator(mode="after")
+    def _province_matches_postcode(self):
+        self.province = canonical_province(self.province, self.postal_code)
+        return self
+
+    @field_validator("nif")
+    @classmethod
+    def _valid_nif(cls, value: str) -> str:
+        from app.utils.tax_id import is_valid_tax_id, normalize_tax_id
+        if not is_valid_tax_id(value):
+            raise ValueError("NIF/CIF/NIE no válido")
+        return normalize_tax_id(value)
+
+
+class CheckoutPreConfirm(BaseModel):
+    """
+    Último paso antes de cobrar: aceptación expresa de las condiciones de venta
+    y, opcionalmente, datos fiscales para factura con NIF.
+    """
+    order_number: str = Field(..., max_length=20)
+    payment_intent_id: str = Field(..., max_length=255)
+    accept_terms: bool = False
+    terms_version: Optional[str] = Field(None, max_length=20)
+    billing: Optional[BillingInput] = None  # None = factura simplificada sin NIF
+    # Datos finales del formulario (el pedido se crea al preparar el pago y el
+    # cliente puede haberlos corregido después)
+    shipping_address: Optional["AddressInput"] = None
+    guest_email: Optional[EmailStr] = None
+
 
 class CheckoutCreate(BaseModel):
     """Checkout creation schema."""
@@ -77,9 +131,11 @@ class CheckoutValidation(BaseModel):
     errors: List[str]
     subtotal: Decimal
     shipping_cost: Decimal
+    shipping_discount: Decimal = Decimal('0')
     discount: Decimal
     tax: Decimal
     total: Decimal
+    shipping_zone: str = "peninsula"  # peninsula | baleares | quote
 
 
 # =============================================================================

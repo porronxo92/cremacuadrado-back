@@ -66,3 +66,6 @@ prod.env
 /migrate_images_to_blob.py
 /reupload_as_public.py
 /update_db_blob_urls.py
+
+# Skills de Claude Code instaladas en local (ver .claude/skills/THIRD_PARTY.md)
+.claude/skills/

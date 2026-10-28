@@ -1,7 +1,9 @@
 """User-related schemas."""
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+
+from app.utils.spain import canonical_province, normalize_phone, optional_phone
 import re
 
 
@@ -53,10 +55,17 @@ class UserBase(BaseModel):
     last_name: str = Field(..., min_length=1, max_length=100)
     phone: Optional[str] = Field(None, max_length=20)
 
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v: Optional[str]) -> Optional[str]:
+        return optional_phone(v)
+
 
 class UserCreate(UserBase):
     """User registration schema."""
     password: str = Field(..., min_length=8, max_length=100)
+    accept_terms: bool = False       # condiciones y privacidad (obligatorio)
+    marketing_opt_in: bool = False   # comunicaciones comerciales (opcional, sin premarcar)
 
     @field_validator('password')
     @classmethod
@@ -67,7 +76,7 @@ class UserCreate(UserBase):
 class UserLogin(BaseModel):
     """User login schema."""
     email: EmailStr
-    password: str
+    password: str = Field(..., min_length=1, max_length=128)
 
 
 class UserUpdate(BaseModel):
@@ -75,6 +84,11 @@ class UserUpdate(BaseModel):
     first_name: Optional[str] = Field(None, min_length=1, max_length=100)
     last_name: Optional[str] = Field(None, min_length=1, max_length=100)
     phone: Optional[str] = Field(None, max_length=20)
+
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v: Optional[str]) -> Optional[str]:
+        return optional_phone(v)
     marketing_opt_in: Optional[bool] = None
 
 
@@ -112,6 +126,15 @@ class PasswordChange(BaseModel):
 class ForgotPassword(BaseModel):
     """Forgot password request schema."""
     email: EmailStr
+
+
+class EmailStatusRequest(BaseModel):
+    """Checkout: ¿este email ya tiene cuenta?"""
+    email: EmailStr
+
+
+class EmailStatusResponse(BaseModel):
+    registered: bool
 
 
 class ResetPassword(BaseModel):
@@ -152,6 +175,16 @@ class AddressCreate(AddressBase):
     """Address creation schema."""
     is_default: bool = False
 
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v: str) -> str:
+        return normalize_phone(v)
+
+    @model_validator(mode="after")
+    def _province_matches_postcode(self):
+        self.province = canonical_province(self.province, self.postal_code)
+        return self
+
 
 class AddressUpdate(BaseModel):
     """Address update schema."""
@@ -165,6 +198,17 @@ class AddressUpdate(BaseModel):
     postal_code: Optional[str] = Field(None, min_length=4, max_length=10)
     country: Optional[str] = Field(None, max_length=100)
     phone: Optional[str] = Field(None, min_length=9, max_length=20)
+
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v: Optional[str]) -> Optional[str]:
+        return optional_phone(v)
+
+    @model_validator(mode="after")
+    def _province_matches_postcode(self):
+        if self.province is not None and self.postal_code is not None:
+            self.province = canonical_province(self.province, self.postal_code)
+        return self
     is_default: Optional[bool] = None
 
 

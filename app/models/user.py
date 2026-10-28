@@ -1,7 +1,7 @@
 """
 User models - Users, Addresses, Password Reset Tokens, Email Verification Tokens.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship
 
@@ -29,6 +29,9 @@ class User(Base):
     # Login-attempt locking (brute-force protection)
     failed_login_attempts = Column(Integer, default=0, nullable=False)
     locked_until = Column(DateTime, nullable=True)
+    # Activity tracking (admin panel)
+    last_login_at = Column(DateTime, nullable=True)
+    login_count = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -133,7 +136,9 @@ class EmailVerificationToken(Base):
 
     @property
     def is_expired(self) -> bool:
-        return datetime.utcnow() > self.expires_at
+        # En PostgreSQL la columna es TIMESTAMP WITH TIME ZONE (009) y llega con zona; en SQLite, sin ella
+        expires = self.expires_at if self.expires_at.tzinfo else self.expires_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) > expires
 
     @property
     def is_valid(self) -> bool:
@@ -141,3 +146,15 @@ class EmailVerificationToken(Base):
 
     def __repr__(self):
         return f"<EmailVerificationToken for User {self.user_id}>"
+
+
+class LoginAttempt(Base):
+    """Contador de intentos de login fallidos por pareja (email, IP). Ver services/login_throttle.py."""
+    __tablename__ = "login_attempts"
+
+    email = Column(String(255), primary_key=True)
+    ip = Column(String(45), primary_key=True)
+    failures = Column(Integer, default=0, nullable=False)
+    locked_until = Column(DateTime, nullable=True)
+    last_success_at = Column(DateTime, nullable=True)  # IP «conocida» del titular
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)

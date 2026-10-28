@@ -17,6 +17,12 @@ class NewsletterLead(Base):
     source = Column(String(50), default="homepage_popup", nullable=False)
     coupon_code = Column(String(50), nullable=True)
     converted_at = Column(DateTime, nullable=True)  # set when this email registers a user account
+    # Doble opt-in y baja (020_consents.sql)
+    consent_at = Column(DateTime, nullable=True)
+    confirm_token = Column(String(64), nullable=True, unique=True)
+    confirmed_at = Column(DateTime, nullable=True)
+    unsubscribe_token = Column(String(64), nullable=True, unique=True)
+    unsubscribed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     def __repr__(self):

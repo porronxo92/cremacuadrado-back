@@ -17,9 +17,11 @@ logger = logging.getLogger("cremacuadrado.webhooks")
 from app.models.order import Order, OrderItem, Coupon
 from app.models.cart import Cart, CartItem
 from app.models.payment import PaymentIntent as PaymentIntentModel, StripeWebhookEvent, Refund
-from app.services import stripe_service
+from app.services import invoicing, stripe_service
+from app.services.coupon_redemptions import record_redemption, revert_redemption
 from app.services.email import EmailService, send_order_confirmation, OrderEmailData
 from app.config import settings
+from app.utils.site import use_site_url
 
 router = APIRouter()
 
@@ -95,7 +97,8 @@ async def stripe_webhook(request: Request, db: DbSession):
         data: dict = event["data"]["object"]
 
         if event_type == "payment_intent.succeeded":
-            _handle_payment_succeeded(db, data)
+            with use_site_url(_order_site_url(db, data.get("id"))):
+                _handle_payment_succeeded(db, data)
         elif event_type == "payment_intent.payment_failed":
             _handle_payment_failed(db, data)
         elif event_type == "payment_intent.canceled":
@@ -103,7 +106,8 @@ async def stripe_webhook(request: Request, db: DbSession):
         elif event_type == "payment_intent.processing":
             _update_pi_status(db, data["id"], "processing")
         elif event_type == "charge.refunded":
-            _handle_charge_refunded(db, data)
+            with use_site_url(_order_site_url(db, data.get("payment_intent"))):
+                _handle_charge_refunded(db, data)
         elif event_type == "charge.dispute.created":
             _handle_dispute_created(db, data)
         elif event_type == "charge.dispute.closed":
@@ -138,6 +142,17 @@ async def stripe_webhook(request: Request, db: DbSession):
 # Internal handlers
 # ---------------------------------------------------------------------------
 
+def _order_site_url(db: Session, stripe_pi_id: str | None) -> str | None:
+    """Web desde la que se hizo el pedido, para que los emails enlacen a ella."""
+    if not stripe_pi_id:
+        return None
+    order = _get_order_by_pi(db, stripe_pi_id)
+    return order.site_url if order else None
+
+
+_PAYABLE_STATUSES = ("pending_payment", "payment_failed", "cancelled")
+
+
 def _get_order_by_pi(db: Session, stripe_pi_id: str) -> Order | None:
     pi = db.query(PaymentIntentModel).filter(
         PaymentIntentModel.stripe_payment_intent_id == stripe_pi_id
@@ -166,26 +181,24 @@ def handle_payment_succeeded(db: Session, stripe_pi_id: str) -> None:
     _handle_payment_succeeded(db, {"id": stripe_pi_id})
 
 
-def handle_payment_succeeded(db: Session, stripe_pi_id: str) -> None:
-    """
-    Public entry point for processing a succeeded PaymentIntent.
-    Called by both the Stripe webhook handler and the confirmation endpoint
-    (fallback for local dev or delayed webhooks).
-    Idempotent: skips processing if the order is already paid.
-    """
-    _handle_payment_succeeded(db, {"id": stripe_pi_id})
-
-
 def _handle_payment_succeeded(db: Session, data: dict) -> None:
     from app.models.product import Product
 
     stripe_pi_id = data["id"]
     order = _get_order_by_pi(db, stripe_pi_id)
-    if not order or order.status == "paid":
-        logger.info("payment_intent.succeeded skipped pi=%s (order already paid or not found)", stripe_pi_id)
+    if order:
+        # Bloquea la fila: el webhook y el fallback de /checkout/confirmation
+        # pueden llegar a la vez y no deben descontar stock ni facturar dos veces.
+        order = db.query(Order).filter(Order.id == order.id).with_for_update().populate_existing().first()
+    # «cancelled» incluido: la limpieza de pedidos fantasma puede cancelar un
+    # pedido cuyo pago llega después. Cualquier otro estado ya se procesó.
+    if not order or order.status not in _PAYABLE_STATUSES:
+        logger.info("payment_intent.succeeded skipped pi=%s (order already processed or not found)", stripe_pi_id)
         return
 
     logger.info("Order paid: order=%s pi=%s total=%s", order.order_number, stripe_pi_id, order.total)
+    if not order.terms_accepted_at:
+        logger.warning("Order paid without recorded terms acceptance: order=%s", order.order_number)
 
     # Mark order paid
     order.status = "paid"
@@ -227,6 +240,7 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
         coupon = db.query(Coupon).filter(Coupon.code == order.coupon_code).first()
         if coupon:
             coupon.used_count += 1
+        record_redemption(db, order)
 
     # Clear cart — primary: use cart_id stored in PI metadata.
     # Fallback: clear by user_id (covers orders created before metadata was saved).
@@ -250,6 +264,30 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
             db.query(CartItem).filter(CartItem.cart_id == cart.id).delete()
             cart.coupon_code = None
             logger.info("Cart cleared via user_id fallback: user_id=%s order=%s", order.user_id, order.order_number)
+
+    # Issue the invoice (correlative number + immutable snapshot) and commit it
+    # together with the paid status, stock and coupon changes, so a number is
+    # never handed out by an email and then rolled back. Runs in a SAVEPOINT:
+    # an invoicing failure must NOT leave a charged order unpaid — the invoice
+    # can be issued later on request or with scripts/backfill_invoices.py.
+    # La factura NO se adjunta al email de confirmación: el cliente la descarga
+    # o la pide desde "Mis pedidos" (siempre el mismo PDF guardado en el Blob).
+    invoice = None
+    try:
+        with db.begin_nested():
+            invoice = invoicing.issue_invoice_for_order(db, order_with_items)
+    except Exception as exc:
+        invoice = None
+        logger.error("Invoice issuing failed: order=%s error=%s", order.order_number, exc, exc_info=True)
+    db.commit()
+
+    if invoice is not None:
+        try:
+            invoicing.store_pdf(db, invoice)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.error("Invoice PDF failed: invoice=%s error=%s", invoice.invoice_number, exc, exc_info=True)
 
     # Generate Correos shipment (defensive: must NOT break payment processing).
     # While CORREOS_ENABLED=False, skip entirely — no API calls, no mock localizador.
@@ -293,6 +331,7 @@ def _handle_payment_succeeded(db: Session, data: dict) -> None:
             coupon_code=order.coupon_code,
             customer_notes=order.customer_notes,
             tracking_number=tracking_number,
+            is_guest=order.user_id is None,
         ))
         if not sent:
             logger.error("Confirmation email failed: order=%s to=%s", order.order_number, customer_email)
@@ -414,6 +453,17 @@ def _handle_charge_refunded(db: Session, data: dict) -> None:
             status=stripe_refund["status"],
         ))
 
+    # Corrective invoice (serie R) for every completed refund not yet invoiced.
+    # Savepoint: an invoicing error must not block the refund bookkeeping.
+    db.flush()
+    for refund in db.query(Refund).filter(Refund.order_id == order.id, Refund.status == "succeeded").all():
+        try:
+            with db.begin_nested():
+                invoicing.issue_corrective_for_refund(db, order, refund)
+        except Exception as exc:
+            logger.error("Corrective invoice failed: order=%s refund=%s error=%s",
+                         order.order_number, refund.stripe_refund_id, exc, exc_info=True)
+
     if order.status != "refunded":
         order.status = "refunded" if is_full_refund else "partially_refunded"
         logger.info(
@@ -422,6 +472,7 @@ def _handle_charge_refunded(db: Session, data: dict) -> None:
         )
         if is_full_refund:
             _restock_order_items(db, order)
+            revert_redemption(db, order)
 
         customer_email = order.customer_email
         if customer_email:
@@ -431,6 +482,7 @@ def _handle_charge_refunded(db: Session, data: dict) -> None:
                     order_number=order.order_number,
                     customer_name=order.shipping_address.get("first_name", "Cliente"),
                     new_status="refunded",
+                    is_guest=order.user_id is None,
                 )
             except Exception as exc:
                 logger.error("Refund email failed: order=%s error=%s", order.order_number, exc, exc_info=True)

@@ -3,23 +3,33 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 import secrets
 
-from jose import jwt
-from passlib.context import CryptContext
+import bcrypt
+import jwt
 
 from app.config import settings
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# bcrypt only uses the first 72 bytes; passlib truncated silently, so hashes
+# created before the migration keep verifying with the same truncation.
+_BCRYPT_MAX_BYTES = 72
+
+
+def _pw_bytes(password: str) -> bytes:
+    return password.encode("utf-8")[:_BCRYPT_MAX_BYTES]
 
 
 def get_password_hash(password: str) -> str:
-    """Hash a password using bcrypt."""
-    return pwd_context.hash(password)
+    """Hash a password using bcrypt (cost 12)."""
+    return bcrypt.hashpw(_pw_bytes(password), bcrypt.gensalt(rounds=12)).decode("ascii")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against a hash."""
-    return pwd_context.verify(plain_password, hashed_password)
+    """Verify a password against a bcrypt hash (also accepts passlib-generated hashes)."""
+    if not hashed_password:
+        return False
+    try:
+        return bcrypt.checkpw(_pw_bytes(plain_password), hashed_password.encode("ascii"))
+    except ValueError:
+        return False
 
 
 def create_access_token(user_id: int, token_version: int = 0, expires_delta: Optional[timedelta] = None) -> str:
@@ -82,5 +92,5 @@ def decode_token(token: str) -> Optional[dict]:
             algorithms=[settings.ALGORITHM]
         )
         return payload
-    except jwt.JWTError:
+    except jwt.PyJWTError:
         return None

@@ -1,19 +1,27 @@
 """
 Orders API endpoints.
 """
+import io
 import logging
 from typing import List
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import joinedload
 
 from app.api.deps import DbSession, CurrentUser
+from app.models.invoice import Invoice
 from app.models.order import Order, OrderItem
 from app.models.cart import Cart, CartItem
 from app.models.product import Product
 from app.schemas.order import OrderResponse, OrderListResponse, OrderItemResponse
 from app.schemas.common import Message, PaginatedResponse
+from app.schemas.invoice import InvoiceSummary
+from app.services import invoicing, stripe_service
+from app.services.email import send_invoice_email
 from app.utils.url import normalize_image_url
+from app.utils.signing import verify_invoice_token
+from app.limiter import limiter
 from app.config import settings
 
 logger = logging.getLogger("cremacuadrado.orders")
@@ -59,6 +67,24 @@ def list_orders(
         ],
         total, page, page_size
     )
+
+
+@router.get("/invoice-download")
+@limiter.limit("20/minute")
+def download_invoice_with_token(request: Request, order: str, token: str, db: DbSession):
+    """
+    Descarga de la factura con el enlace firmado del email de confirmación.
+    Sirve también para compras como invitado (no requiere sesión).
+    """
+    if not verify_invoice_token(order, token):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Enlace no válido")
+    order_obj = db.query(Order).options(joinedload(Order.items)).filter(Order.order_number == order).first()
+    if not order_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Enlace no válido")
+    invoice = _ensure_primary_invoice(db, order_obj)
+    pdf_bytes = invoicing.get_pdf(db, invoice)
+    db.commit()
+    return _pdf_response(pdf_bytes, invoice.pdf_filename)
 
 
 @router.get("/{order_number}", response_model=OrderResponse)
@@ -116,19 +142,13 @@ def get_order(order_number: str, db: DbSession, current_user: CurrentUser):
     )
 
 
-@router.post("/{order_number}/reorder", response_model=Message)
-def reorder(order_number: str, db: DbSession, current_user: CurrentUser):
-    """Add items from a previous order to cart."""
-    order = db.query(Order).options(
-        joinedload(Order.items)
-    ).filter(
-        Order.order_number == order_number,
-        Order.user_id == current_user.id
-    ).first()
-
-    if not order:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
-
+def _add_order_items_to_cart(db, order: Order, user, replace: bool = False) -> tuple[int, list[str]]:
+    """
+    Mete las líneas de un pedido en el carrito del usuario (sin commit).
+    Salta variantes inactivas o sin stock y limita la cantidad al stock.
+    Con replace=True vacía antes el carrito y la cantidad es la del pedido (no suma).
+    Devuelve (líneas añadidas, nombres no disponibles).
+    """
     from app.models.product import ProductVariant
 
     # Batch-load variants and products for all order items
@@ -148,11 +168,16 @@ def reorder(order_number: str, db: DbSession, current_user: CurrentUser):
         ).all()
     }
 
-    cart = db.query(Cart).filter(Cart.user_id == current_user.id).first()
+    cart = db.query(Cart).filter(Cart.user_id == user.id).first()
     if not cart:
-        cart = Cart(user_id=current_user.id)
+        cart = Cart(user_id=user.id)
         db.add(cart)
         db.flush()
+
+    if replace:
+        db.query(CartItem).filter(CartItem.cart_id == cart.id).delete(synchronize_session=False)
+        db.expire(cart, ["items"])
+        cart.coupon_code = None
 
     cart_items_by_variant = {
         ci.product_variant_id: ci for ci in db.query(CartItem).filter(
@@ -162,7 +187,7 @@ def reorder(order_number: str, db: DbSession, current_user: CurrentUser):
     } if variant_ids else {}
 
     added_count = 0
-    unavailable = []
+    unavailable: list[str] = []
 
     for order_item in order.items:
         if not order_item.product_id or not order_item.product_variant_id:
@@ -185,24 +210,83 @@ def reorder(order_number: str, db: DbSession, current_user: CurrentUser):
         if existing_item:
             existing_item.quantity = min(existing_item.quantity + quantity_to_add, variant.stock)
         else:
-            db.add(CartItem(
+            new_item = CartItem(
                 cart_id=cart.id,
                 product_id=product.id,
                 product_variant_id=variant.id,
                 quantity=quantity_to_add,
                 price_at_add=variant.price,
-            ))
+            )
+            db.add(new_item)
+            cart_items_by_variant[variant.id] = new_item
 
         added_count += 1
+
+    return added_count, unavailable
+
+
+@router.post("/{order_number}/reorder", response_model=Message)
+def reorder(order_number: str, db: DbSession, current_user: CurrentUser):
+    """Add items from a previous order to cart."""
+    order = db.query(Order).options(
+        joinedload(Order.items)
+    ).filter(
+        Order.order_number == order_number,
+        Order.user_id == current_user.id
+    ).first()
+
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
+
+    added_count, unavailable = _add_order_items_to_cart(db, order, current_user)
 
     db.commit()
 
     if unavailable:
-        message = f"Se añadieron {added_count} productos. No disponibles: {', '.join(unavailable)}"
+        message = f"Hemos añadido {added_count} productos. No están disponibles: {', '.join(unavailable)}"
     else:
-        message = f"Se añadieron {added_count} productos al carrito"
+        message = f"Hemos añadido {added_count} productos al carrito"
 
     return Message(message=message)
+
+
+@router.post("/{order_number}/resume-payment")
+@limiter.limit("10/minute")
+def resume_payment(request: Request, order_number: str, db: DbSession, current_user: CurrentUser):
+    """
+    «Continuar con el pago» de un pedido pending_payment: devuelve sus líneas (y el
+    cupón) a la cesta, cancela el pedido viejo y su PaymentIntent, y el checkout
+    creará un pedido nuevo con los precios actuales.
+    """
+    order = _get_owned_order(db, order_number, current_user.id)
+    if order.status != "pending_payment":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Este pedido ya no está pendiente de pago",
+        )
+
+    added, skipped = _add_order_items_to_cart(db, order, current_user, replace=True)
+    if added == 0:
+        db.rollback()  # no se toca ni la cesta ni el pedido
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Los productos de este pedido ya no están disponibles. Puedes elegir otros en la tienda.",
+        )
+
+    cart = db.query(Cart).filter(Cart.user_id == current_user.id).first()
+    if order.coupon_code:
+        cart.coupon_code = order.coupon_code  # la validación normal del carrito decide si aplica
+    order.status = "cancelled"
+    payment_intent_id = order.payment_intent_id
+    db.commit()
+
+    # Evita un segundo cobro del pedido cancelado; si Stripe falla, no importa
+    stripe_service.cancel_payment_intent_best_effort(payment_intent_id)
+
+    message = f"Hemos devuelto {added} producto(s) a tu cesta"
+    if skipped:
+        message += f". No están disponibles: {', '.join(skipped)}"
+    return {"order_number": order.order_number, "items_added": added, "skipped": skipped, "message": message}
 
 
 @router.post("/{order_number}/cancel", response_model=Message)
@@ -224,56 +308,105 @@ def cancel_order(order_number: str, db: DbSession, current_user: CurrentUser):
 
     order.status = "cancelled"
     db.commit()
-    return Message(message="Pedido cancelado correctamente")
+    return Message(message="Pedido cancelado")
 
 
-_INVOICEABLE_STATUSES = {"paid", "processing", "shipped", "delivered"}
-
-
-@router.post("/{order_number}/request-invoice", response_model=Message)
-def request_invoice(
-    order_number: str,
-    db: DbSession,
-    current_user: CurrentUser,
-    background_tasks: BackgroundTasks,
-):
-    """Generate a PDF invoice and send it by email to the authenticated user."""
-    order = db.query(Order).options(
-        joinedload(Order.items)
-    ).filter(
+def _get_owned_order(db, order_number: str, user_id: int) -> Order:
+    order = db.query(Order).options(joinedload(Order.items)).filter(
         Order.order_number == order_number,
-        Order.user_id == current_user.id,
+        Order.user_id == user_id,
     ).first()
-
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
+    return order
 
-    if order.status not in _INVOICEABLE_STATUSES:
+
+def _ensure_primary_invoice(db, order: Order) -> Invoice:
+    """Factura del pedido; la emite si no existe (pedidos anteriores a la facturación)."""
+    invoice = invoicing.primary_invoice(db, order.id)
+    if invoice:
+        return invoice
+    if order.status not in invoicing.INVOICEABLE_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="La factura solo está disponible para pedidos pagados",
         )
+    invoice = invoicing.issue_invoice_for_order(db, order)
+    db.commit()
+    return invoice
 
-    customer_name = f"{current_user.first_name} {current_user.last_name}".strip()
+
+def _pdf_response(pdf_bytes: bytes, filename: str) -> StreamingResponse:
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+@router.get("/{order_number}/invoices", response_model=List[InvoiceSummary])
+def list_order_invoices(order_number: str, db: DbSession, current_user: CurrentUser):
+    """Facturas (ordinaria y rectificativas) de un pedido del usuario."""
+    order = _get_owned_order(db, order_number, current_user.id)
+    invoices = (
+        db.query(Invoice)
+        .filter(Invoice.order_id == order.id)
+        .order_by(Invoice.issued_at, Invoice.id)
+        .all()
+    )
+    return [InvoiceSummary.model_validate(inv) for inv in invoices]
+
+
+@router.get("/{order_number}/invoice")
+def download_invoice(
+    order_number: str,
+    db: DbSession,
+    current_user: CurrentUser,
+    number: str | None = Query(None, description="Número de factura; por defecto la del pedido"),
+):
+    """Descarga el PDF guardado de la factura (o de una rectificativa con ?number=)."""
+    order = _get_owned_order(db, order_number, current_user.id)
+    if number:
+        invoice = db.query(Invoice).filter(
+            Invoice.order_id == order.id, Invoice.invoice_number == number,
+        ).first()
+        if not invoice:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Factura no encontrada")
+    else:
+        invoice = _ensure_primary_invoice(db, order)
+
+    pdf_bytes = invoicing.get_pdf(db, invoice)
+    db.commit()
+    return _pdf_response(pdf_bytes, invoice.pdf_filename)
+
+
+@router.post("/{order_number}/request-invoice", response_model=Message)
+def request_invoice(order_number: str, db: DbSession, current_user: CurrentUser):
+    """Reenvía por email la factura YA EMITIDA del pedido (el mismo PDF guardado)."""
+    order = _get_owned_order(db, order_number, current_user.id)
+    invoice = _ensure_primary_invoice(db, order)
+
+    pdf_bytes = invoicing.get_pdf(db, invoice)
     customer_email = current_user.email
+    sent = send_invoice_email(
+        to_email=customer_email,
+        first_name=current_user.first_name or "",
+        order_number=order.order_number,
+        invoice_number=invoice.invoice_number,
+        pdf_bytes=pdf_bytes,
+    )
+    if not sent:
+        db.commit()  # keep pdf_status/blob updates even if the email failed
+        logger.error("Invoice email failed: invoice=%s order=%s", invoice.invoice_number, order_number)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="No hemos podido enviar la factura. Inténtalo de nuevo más tarde o descárgala.",
+        )
 
-    def _send_invoice():
-        try:
-            from app.services.invoice import generate_invoice_pdf
-            from app.services.email import send_invoice_email
-            pdf_bytes = generate_invoice_pdf(order, customer_name, customer_email)
-            sent = send_invoice_email(
-                to_email=customer_email,
-                first_name=current_user.first_name or customer_name,
-                order_number=order_number,
-                pdf_bytes=pdf_bytes,
-            )
-            if not sent:
-                logger.error("Invoice email failed: order=%s to=%s", order_number, customer_email)
-            else:
-                logger.info("Invoice email sent: order=%s to=%s", order_number, customer_email)
-        except Exception as exc:
-            logger.error("Invoice email error: order=%s to=%s error=%s", order_number, customer_email, exc, exc_info=True)
-
-    background_tasks.add_task(_send_invoice)
-    return Message(message=f"Factura enviada a {customer_email}")
+    invoicing.mark_sent(invoice)
+    db.commit()
+    logger.info("Invoice email sent: invoice=%s order=%s", invoice.invoice_number, order_number)
+    return Message(message=f"Factura {invoice.invoice_number} enviada a {customer_email}")

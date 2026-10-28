@@ -1,6 +1,7 @@
 """
 Cart API endpoints.
 """
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 import uuid
@@ -11,7 +12,9 @@ from sqlalchemy.orm import Session, joinedload
 from app.api.deps import DbSession, CurrentUserOptional
 from app.models.cart import Cart, CartItem
 from app.models.product import Product, ProductVariant
-from app.models.order import Coupon, Order
+from app.models.order import Coupon
+from app.services.coupon_redemptions import user_coupon_error
+from app.services.pricing import compute_totals, coupon_rejection_reason
 from app.models.user import User
 from app.schemas.cart import (
     CartResponse, CartItemCreate, CartItemUpdate, CartItemResponse,
@@ -35,10 +38,36 @@ def set_cart_cookie(response: Response, session_id: str) -> None:
     )
 
 
+def _discard_if_stale(db: Session, cart: Optional[Cart]) -> None:
+    """
+    Vacía el carrito de un usuario si lleva más de USER_CART_TTL_HOURS sin
+    actividad (sin añadir ni cambiar productos). Así, al volver a entrar, solo
+    se recupera un carrito reciente y no se suman productos de hace días.
+    """
+    if cart is None:
+        return
+    items = db.query(CartItem).filter(CartItem.cart_id == cart.id).all()
+    if not items:
+        return
+    last_activity = max(
+        [i.updated_at or i.created_at for i in items if (i.updated_at or i.created_at)]
+        + ([cart.updated_at] if cart.updated_at else [])
+    )
+    if last_activity.tzinfo is not None:
+        last_activity = last_activity.astimezone(timezone.utc).replace(tzinfo=None)
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=settings.USER_CART_TTL_HOURS)
+    if last_activity < cutoff:
+        for item in items:
+            db.delete(item)
+        cart.coupon_code = None
+        db.flush()
+
+
 def get_or_create_cart(db: Session, user: Optional[User] = None, session_id: Optional[str] = None) -> Cart:
     cart = None
     if user:
         user_cart = db.query(Cart).filter(Cart.user_id == user.id).first()
+        _discard_if_stale(db, user_cart)
         session_cart = (
             db.query(Cart).filter(Cart.session_id == session_id).first()
             if session_id else None
@@ -85,14 +114,6 @@ def get_or_create_cart(db: Session, user: Optional[User] = None, session_id: Opt
     return cart
 
 
-def calculate_shipping(subtotal: Decimal) -> tuple[Decimal, Optional[str]]:
-    threshold = Decimal(str(settings.FREE_SHIPPING_THRESHOLD))
-    if subtotal >= threshold:
-        return Decimal('0'), "Envio gratis!"
-    remaining = threshold - subtotal
-    return Decimal(str(settings.SHIPPING_COST)), f"Añade {remaining:.2f}€ más para envío gratis"
-
-
 def _load_cart(db: Session, cart_id: int) -> Cart:
     return db.query(Cart).options(
         joinedload(Cart.items).joinedload(CartItem.variant).joinedload(ProductVariant.product).joinedload(Product.images),
@@ -103,6 +124,13 @@ def _load_cart(db: Session, cart_id: int) -> Cart:
 def cart_to_response(cart: Cart, db: Session) -> CartResponse:
     items = []
     subtotal = Decimal('0')
+
+    # El carrito muestra (y el checkout cobra) el precio vigente de cada formato
+    stale = [i for i in cart.items if i.variant and i.price_at_add != i.variant.price]
+    for item in stale:
+        item.price_at_add = item.variant.price
+    if stale:
+        db.commit()
 
     for item in cart.items:
         variant = item.variant
@@ -126,37 +154,36 @@ def cart_to_response(cart: Cart, db: Session) -> CartResponse:
             stock_available=variant.stock,
         ))
 
-    discount = Decimal('0')
-    coupon_info = None
+    coupon = None
     if cart.coupon_code and cart.user_id:
         coupon = db.query(Coupon).filter(
             Coupon.code == cart.coupon_code, Coupon.is_active == True
         ).first()
         if coupon and coupon.is_valid:
             # Per-user check: remove the coupon if this user already completed
-            # an order with it (prevents reuse of single-use welcome coupons).
-            already_used = db.query(Order).filter(
-                Order.user_id == cart.user_id,
-                Order.coupon_code == cart.coupon_code,
-                Order.status.in_(['paid', 'processing', 'shipped', 'delivered']),
-            ).first()
-            if already_used:
+            # an order with it (single-use coupons) or it is someone else's personal coupon.
+            if user_coupon_error(db, coupon, cart.user_id):
                 cart.coupon_code = None
                 db.commit()
-            else:
-                discount = coupon.calculate_discount(subtotal)
-                coupon_info = CouponInfo(
-                    code=coupon.code,
-                    discount_type=coupon.discount_type,
-                    discount_value=coupon.discount_value,
-                    discount_amount=discount,
-                )
+                coupon = None
         else:
             # Coupon no longer valid globally — remove it from the cart silently
             cart.coupon_code = None
             db.commit()
+            coupon = None
 
-    shipping_cost, shipping_message = calculate_shipping(subtotal - discount)
+    # Si el cupón deja de aplicar (mínimo, envío ya gratis) sigue en el carrito, con applies=False
+    totals = compute_totals(subtotal, coupon)
+    coupon_info = None
+    if coupon:
+        coupon_info = CouponInfo(
+            code=coupon.code,
+            discount_type=coupon.discount_type,
+            discount_value=coupon.discount_value,
+            discount_amount=totals.coupon_amount,
+            applies=totals.coupon_applies,
+            message=totals.coupon_message,
+        )
 
     return CartResponse(
         id=cart.id,
@@ -164,10 +191,11 @@ def cart_to_response(cart: Cart, db: Session) -> CartResponse:
         items=items,
         subtotal=subtotal,
         coupon=coupon_info,
-        discount=discount,
-        shipping_cost=shipping_cost,
-        shipping_message=shipping_message,
-        total=subtotal - discount + shipping_cost,
+        discount=totals.discount,
+        shipping_discount=totals.shipping_discount,
+        shipping_cost=totals.shipping_cost,
+        shipping_message=totals.shipping_message,
+        total=totals.total,
         updated_at=cart.updated_at,
     )
 
@@ -222,7 +250,7 @@ def add_to_cart(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no disponible")
 
     if not variant.is_in_stock:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Formato agotado")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Este formato está agotado")
 
     if item_data.quantity > variant.stock:
         raise HTTPException(
@@ -347,32 +375,23 @@ def apply_coupon(
     if cart.coupon_code:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Ya tienes un cupón aplicado. Quítalo antes de aplicar otro."
+            detail="Ya tienes un cupón aplicado. Quítalo para usar otro."
         )
 
     coupon = db.query(Coupon).filter(Coupon.code == coupon_data.code.upper()).first()
     if not coupon:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cupón no encontrado")
     if not coupon.is_valid:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cupón no válido o expirado")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El cupón no es válido o ha caducado")
 
     subtotal = cart.subtotal
-    if subtotal < coupon.min_order_amount:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"El pedido mínimo para este cupón es {coupon.min_order_amount}€"
-        )
+    reason = coupon_rejection_reason(coupon, subtotal)
+    if reason:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=reason)
 
-    already_used = db.query(Order).filter(
-        Order.user_id == current_user.id,
-        Order.coupon_code == coupon_data.code.upper(),
-        Order.status.in_(['paid', 'processing', 'shipped', 'delivered']),
-    ).first()
-    if already_used:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Este cupón ya fue utilizado en un pedido anterior"
-        )
+    user_error = user_coupon_error(db, coupon, current_user.id)
+    if user_error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=user_error)
 
     cart.coupon_code = coupon.code
     db.commit()

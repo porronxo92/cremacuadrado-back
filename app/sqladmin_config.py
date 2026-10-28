@@ -17,7 +17,17 @@ from app.utils.security import verify_password
 
 
 class AdminAuth(AuthenticationBackend):
+    """
+    Login del panel /admin (SQLAdmin), con las mismas protecciones que el API:
+    bloqueo por (email, IP) tras varios intentos fallidos (services/login_throttle.py), sesión ligada al usuario y a su
+    token_version (cerrar sesión o desactivar la cuenta la invalida al momento)
+    y registro de cada intento en admin_audit_log.
+    """
+
     async def login(self, request: Request) -> bool:
+        from datetime import datetime, timedelta, timezone
+        from app.services import audit, login_throttle
+
         form = await request.form()
         email = str(form.get("username", "")).strip().lower()
         password = str(form.get("password", ""))
@@ -25,17 +35,38 @@ class AdminAuth(AuthenticationBackend):
             return False
         db = SessionLocal()
         try:
-            user = db.query(User).filter(
-                User.email == email,
-                User.role == "admin",
-                User.is_active == True,
-            ).first()
-            if user is None or user.password_hash is None:
-                return False  # Google-only accounts cannot log in here
-            if not verify_password(password, user.password_hash):
+            user = db.query(User).filter(User.email == email).first()
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+            def fail(reason: str) -> bool:
+                audit.write(action="LOGIN_FAIL", path=f"/admin ({reason})", request=request,
+                            admin_user_id=user.id if user else None, admin_email=email)
                 return False
-            # Write the token into the session — authenticate() reads it on every request
+
+            ip0 = login_throttle.client_ip(request)
+            if user is None or user.role != "admin" or not user.is_active or user.password_hash is None:
+                if not login_throttle.minutes_locked(db, email, ip0, None):
+                    login_throttle.record_failure(db, email, ip0, None)
+                    db.commit()
+                return fail("unknown_or_not_admin")
+            # Mismo freno que el login del API: bloqueo por (email, IP), no por cuenta
+            ip = login_throttle.client_ip(request)
+            if login_throttle.minutes_locked(db, email, ip, user):
+                return fail("locked")
+            if not verify_password(password, user.password_hash):
+                login_throttle.record_failure(db, email, ip, user)
+                db.commit()
+                return fail("bad_password")
+
+            login_throttle.record_success(db, email, ip, user)
+            db.commit()
+            request.session.clear()
+            request.session["admin_user_id"] = user.id
+            request.session["token_version"] = user.token_version or 0
+            # Compatibilidad con /admin-upload (main.py)
             request.session["token"] = "authenticated"
+            audit.write(action="LOGIN_OK", path="/admin", request=request,
+                        admin_user_id=user.id, admin_email=user.email)
             return True
         finally:
             db.close()
@@ -45,7 +76,21 @@ class AdminAuth(AuthenticationBackend):
         return True
 
     async def authenticate(self, request: Request) -> bool:
-        return bool(request.session.get("token"))
+        user_id = request.session.get("admin_user_id")
+        if not user_id:
+            return False
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.id == user_id).first()
+            valid = (
+                user is not None and user.is_active and user.role == "admin"
+                and (user.token_version or 0) == request.session.get("token_version")
+            )
+        finally:
+            db.close()
+        if not valid:
+            request.session.clear()
+        return valid
 
 
 # ── ModelViews ────────────────────────────────────────────────────────────────
@@ -88,6 +133,7 @@ from app.models.product import (
 from app.models.cart import Cart, CartItem
 from app.models.order import Order, OrderItem, Coupon
 from app.models.payment import PaymentIntent, StripeWebhookEvent, Refund
+from app.models.invoice import Invoice
 from app.models.blog import BlogPost, BlogCategory
 from app.models.point_of_sale import PointOfSale
 
@@ -560,6 +606,32 @@ class RefundAdmin(ModelView, model=Refund):
     can_edit = False
 
     form_excluded_columns = ["created_at", "updated_at"]
+
+
+class InvoiceAdmin(ModelView, model=Invoice):
+    """Solo lectura: las facturas emitidas son inmutables (trigger en BBDD)."""
+    name = "Factura"
+    name_plural = "Facturas"
+    icon = "fa-solid fa-file-invoice"
+    category = "Pagos"
+
+    column_list = [
+        Invoice.id,
+        Invoice.invoice_number,
+        Invoice.invoice_type,
+        Invoice.order_id,
+        Invoice.issued_at,
+        Invoice.total,
+        Invoice.pdf_status,
+        Invoice.sent_count,
+    ]
+    column_searchable_list = [Invoice.invoice_number]
+    column_sortable_list = [Invoice.id, Invoice.issued_at, Invoice.total]
+    column_default_sort = [(Invoice.id, True)]
+
+    can_create = False
+    can_delete = False
+    can_edit = False
 
 
 # ─── Blog ─────────────────────────────────────────────────────────────────────

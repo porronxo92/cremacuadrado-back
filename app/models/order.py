@@ -2,9 +2,9 @@
 Order models - Orders, OrderItems, Coupons.
 """
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import json
-from sqlalchemy import Column, Integer, String, Text, Numeric, Boolean, DateTime, ForeignKey, CheckConstraint
+from sqlalchemy import Column, Integer, String, Text, Numeric, Boolean, DateTime, ForeignKey, CheckConstraint, Index, func
 from sqlalchemy.orm import relationship
 
 from app.models.database import Base
@@ -13,7 +13,7 @@ from app.models.database import Base
 class Order(Base):
     """Order model."""
     __tablename__ = "orders"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     order_number = Column(String(20), unique=True, nullable=False, index=True)
@@ -26,6 +26,13 @@ class Order(Base):
     shipping_cost = Column(Numeric(10, 2), default=0, nullable=False)
     discount = Column(Numeric(10, 2), default=0, nullable=False)
     tax = Column(Numeric(10, 2), default=0, nullable=False)
+    tax_rate = Column(Numeric(5, 4), nullable=True)  # IVA aplicado (copia); added by 016_invoices.sql
+    # Aceptación expresa de las condiciones de venta (017_order_legal_acceptance.sql)
+    terms_version = Column(String(20), nullable=True)
+    terms_accepted_at = Column(DateTime, nullable=True)
+    acceptance_ip = Column(String(45), nullable=True)
+    # Web desde la que se hizo el pedido (enlaces de los emails) — 023_site_url_pos_geo.sql
+    site_url = Column(String(255), nullable=True)
     total = Column(Numeric(10, 2), nullable=False)
     
     # Coupon
@@ -39,9 +46,12 @@ class Order(Base):
     payment_method = Column(String(50), nullable=True)  # card, bizum, etc.
     payment_intent_id = Column(String(255), nullable=True)  # Stripe payment intent
     paid_at = Column(DateTime, nullable=True)
+    # Recordatorio de pago enviado (pedido abandonado) — 028_order_payment_reminder.sql
+    payment_reminder_sent_at = Column(DateTime, nullable=True)
     
     # Shipping
     tracking_number = Column(String(100), nullable=True)
+    shipping_status = Column(String(30), nullable=True, default="pending")  # added by 008_correos_shipments.sql
     shipped_at = Column(DateTime, nullable=True)
     delivered_at = Column(DateTime, nullable=True)
     
@@ -61,6 +71,7 @@ class Order(Base):
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     payment_intents = relationship("PaymentIntent", back_populates="order")
     shipment = relationship("Shipment", back_populates="order", uselist=False, cascade="all, delete-orphan")
+    invoices = relationship("Invoice", viewonly=True, order_by="Invoice.id")
     
     @property
     def shipping_address(self) -> dict:
@@ -107,6 +118,15 @@ class Order(Base):
         return f"<Order {self.order_number}>"
 
 
+# Índices de 024_orders_guest_link_indexes.sql (parciales solo en PostgreSQL)
+Index("idx_orders_guest_email_lower", func.lower(Order.guest_email),
+      postgresql_where=Order.user_id.is_(None))
+Index("idx_orders_user_coupon", Order.user_id, func.upper(Order.coupon_code),
+      postgresql_where=Order.coupon_code.isnot(None))
+Index("idx_orders_pending_payment_created", Order.created_at,
+      postgresql_where=Order.status == "pending_payment")
+
+
 class OrderItem(Base):
     """Order item model."""
     __tablename__ = "order_items"
@@ -142,7 +162,7 @@ class Coupon(Base):
     id = Column(Integer, primary_key=True, index=True)
     code = Column(String(50), unique=True, nullable=False, index=True)
     description = Column(String(255), nullable=True)
-    discount_type = Column(String(20), nullable=False)  # percent, fixed
+    discount_type = Column(String(20), nullable=False)  # percent, fixed, free_shipping
     discount_value = Column(Numeric(10, 2), nullable=False)
     min_order_amount = Column(Numeric(10, 2), default=0, nullable=False)
     max_discount_amount = Column(Numeric(10, 2), nullable=True)  # For percent discounts
@@ -151,12 +171,18 @@ class Coupon(Base):
     valid_from = Column(DateTime, nullable=True)
     valid_until = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
+    # Cupón personal: solo lo puede aplicar esa cuenta (029_legacy_customers.sql)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    reusable = Column(Boolean, default=False, nullable=False)  # False = un solo uso por cliente
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
     # Constraints
     __table_args__ = (
-        CheckConstraint("discount_type IN ('percent', 'fixed')", name='check_discount_type'),
-        CheckConstraint('discount_value > 0', name='check_discount_positive'),
+        CheckConstraint("discount_type IN ('percent', 'fixed', 'free_shipping')", name='check_discount_type'),
+        CheckConstraint(
+            "discount_type = 'free_shipping' OR discount_value > 0",
+            name='check_discount_positive',
+        ),
     )
     
     @property
@@ -176,8 +202,8 @@ class Coupon(Base):
         return True
     
     def calculate_discount(self, subtotal: Decimal) -> Decimal:
-        """Calculate discount amount for a given subtotal."""
-        if subtotal < self.min_order_amount:
+        """Descuento sobre productos (0 para free_shipping: lo resuelve services/pricing.py)."""
+        if subtotal < self.min_order_amount or self.discount_type == 'free_shipping':
             return Decimal('0')
         
         if self.discount_type == 'percent':
@@ -186,8 +212,30 @@ class Coupon(Base):
                 discount = min(discount, self.max_discount_amount)
         else:  # fixed
             discount = min(self.discount_value, subtotal)
-        
-        return discount
+
+        return Decimal(discount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     
     def __repr__(self):
         return f"<Coupon {self.code}>"
+
+
+class CouponRedemption(Base):
+    """One row per paid order that used a coupon (who used which coupon, when, and how much)."""
+    __tablename__ = "coupon_redemptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    coupon_id = Column(Integer, ForeignKey("coupons.id", ondelete="SET NULL"), nullable=True, index=True)
+    coupon_code = Column(String(50), nullable=False, index=True)  # snapshot, survives coupon deletion
+    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, unique=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    email = Column(String(255), nullable=True)
+    discount_amount = Column(Numeric(10, 2), default=0, nullable=False)
+    reverted_at = Column(DateTime, nullable=True)  # order cancelled / fully refunded
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    coupon = relationship("Coupon")
+    order = relationship("Order")
+    user = relationship("User")
+
+    def __repr__(self):
+        return f"<CouponRedemption {self.coupon_code} order={self.order_id}>"

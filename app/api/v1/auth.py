@@ -5,17 +5,19 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request, status
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError as JWTError
 
 from app.api.deps import DbSession, CurrentUser
-from app.limiter import limiter
+from app.limiter import limiter, _get_real_ip
 
 logger = logging.getLogger("cremacuadrado.auth")
 from app.models.user import User, PasswordResetToken, EmailVerificationToken
 from app.models.lead import NewsletterLead
 from app.schemas.user import (
     UserCreate, UserLogin, UserResponse, Token,
-    ForgotPassword, ResetPassword, RefreshToken, GoogleAuthRequest
+    ForgotPassword, ResetPassword, RefreshToken, GoogleAuthRequest,
+    EmailStatusRequest, EmailStatusResponse,
 )
 from app.schemas.common import Message
 from app.utils.security import (
@@ -23,19 +25,30 @@ from app.utils.security import (
     create_access_token, create_refresh_token,
     generate_reset_token
 )
+from app.services import consents, login_throttle
+from app.services.user_accounts import link_guest_orders
+from app.services.legacy_customers import find_legacy_customer, grant_legacy_benefit
 from app.services.email import EmailService
 from app.config import settings
 
-_MAX_LOGIN_ATTEMPTS = 5
-_LOCKOUT_MINUTES = 15
-
 router = APIRouter()
+
+
+def _record_login(user: User) -> None:
+    """Track last access for the admin panel. Caller commits."""
+    user.last_login_at = datetime.now(timezone.utc)
+    user.login_count = (user.login_count or 0) + 1
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
 async def register(request: Request, user_data: UserCreate, db: DbSession):
     """Register a new user account."""
+    if not user_data.accept_terms:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Debes aceptar las condiciones de uso y la política de privacidad",
+        )
     existing_user = db.query(User).filter(User.email == user_data.email.lower()).first()
     if existing_user:
         logger.warning("Register rejected — email already exists: %s", user_data.email.lower())
@@ -51,9 +64,16 @@ async def register(request: Request, user_data: UserCreate, db: DbSession):
         last_name=user_data.last_name,
         phone=user_data.phone,
         role="customer",
+        marketing_opt_in=user_data.marketing_opt_in,
     )
 
     db.add(user)
+    db.flush()
+    consents.record_consent(db, email=user.email, purpose=consents.TERMS_REGISTER, granted=True,
+                            source="register", request=request, user_id=user.id)
+    if user_data.marketing_opt_in:
+        consents.record_consent(db, email=user.email, purpose=consents.MARKETING, granted=True,
+                                source="register", request=request, user_id=user.id)
     db.commit()
     db.refresh(user)
 
@@ -73,11 +93,14 @@ async def register(request: Request, user_data: UserCreate, db: DbSession):
     db.commit()
 
     logger.info("New user registered: email=%s", user.email)
-    if not EmailService.send_welcome_email(user.email, user.first_name):
-        logger.error("Welcome email failed: email=%s", user.email)
-    else:
-        logger.info("Welcome email sent: email=%s", user.email)
-    if not EmailService.send_email_verification(user.email, user.first_name, ev_token.token):
+    # Cliente de la web antigua: su bienvenida (con el cupón) llega al verificar el email
+    is_legacy = find_legacy_customer(db, user.email) is not None
+    if not is_legacy:
+        if not EmailService.send_welcome_email(user.email, user.first_name):
+            logger.error("Welcome email failed: email=%s", user.email)
+        else:
+            logger.info("Welcome email sent: email=%s", user.email)
+    if not EmailService.send_email_verification(user.email, user.first_name, ev_token.token, legacy_benefit=is_legacy):
         logger.error("Verification email failed: email=%s", user.email)
     else:
         logger.info("Verification email sent: email=%s", user.email)
@@ -85,55 +108,66 @@ async def register(request: Request, user_data: UserCreate, db: DbSession):
     return user
 
 
+@router.post("/email-status", response_model=EmailStatusResponse)
+@limiter.limit("10/minute")
+async def email_status(request: Request, data: EmailStatusRequest, db: DbSession):
+    """
+    Checkout de invitado: indica si el email ya tiene una cuenta activa, para
+    pedir al cliente que inicie sesión y el pedido quede asociado a su cuenta.
+    No revela más que /register (que ya responde «Ya existe una cuenta»);
+    limitado por IP para frenar la enumeración de emails.
+    """
+    exists = db.query(User.id).filter(
+        User.email == data.email.lower(), User.is_active.is_(True)
+    ).first() is not None
+    return EmailStatusResponse(registered=exists)
+
+
 @router.post("/login", response_model=Token)
 @limiter.limit("10/minute")
 async def login(request: Request, credentials: UserLogin, db: DbSession):
     """Login with email and password."""
-    user = db.query(User).filter(User.email == credentials.email.lower()).first()
+    email = credentials.email.lower()
+    ip = _get_real_ip(request)[:45]
+    user = db.query(User).filter(User.email == email).first()
 
-    if not user or not user.password_hash:
-        logger.warning("Login failed — bad credentials: email=%s", credentials.email.lower())
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Email o contraseña incorrectos"
-        )
-
-    if not user.is_active:
-        logger.warning("Login rejected — inactive account: email=%s", user.email)
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Cuenta desactivada"
-        )
-
-    # Check account lockout
-    locked_until = getattr(user, "locked_until", None)
-    if locked_until and datetime.now(timezone.utc) < locked_until.replace(tzinfo=timezone.utc):
-        remaining = int((locked_until.replace(tzinfo=timezone.utc) - datetime.now(timezone.utc)).total_seconds() / 60) + 1
-        logger.warning("Login rejected — account locked: email=%s", user.email)
+    # Bloqueo por (email, IP) y freno distribuido por cuenta: ver services/login_throttle.py.
+    # Se comprueba antes de mirar la contraseña y también para emails inexistentes.
+    remaining = login_throttle.minutes_locked(db, email, ip, user)
+    if remaining:
+        logger.warning("Login rejected — throttled: email=%s", email)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Cuenta bloqueada temporalmente. Inténtalo de nuevo en {remaining} minutos."
+            detail=f"Demasiados intentos. Inténtalo de nuevo en {remaining} minutos o restablece tu contraseña."
         )
 
-    if not verify_password(credentials.password, user.password_hash):
-        # Increment failed attempts and possibly lock the account
-        attempts = getattr(user, "failed_login_attempts", 0) + 1
-        user.failed_login_attempts = attempts
-        if attempts >= _MAX_LOGIN_ATTEMPTS:
-            user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=_LOCKOUT_MINUTES)
-            user.failed_login_attempts = 0
-            logger.warning("Account locked after %d attempts: email=%s", _MAX_LOGIN_ATTEMPTS, user.email)
+    if not user or not user.password_hash or not user.is_active or not verify_password(
+        credentials.password, user.password_hash
+    ):
+        inactive_ok = bool(user and user.password_hash and not user.is_active
+                           and verify_password(credentials.password, user.password_hash))
+        login_throttle.record_failure(db, email, ip, user)
         db.commit()
-        logger.warning("Login failed — bad password: email=%s attempts=%d", user.email, attempts)
+        if inactive_ok:
+            logger.warning("Login rejected — inactive account: email=%s", email)
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cuenta desactivada"
+            )
+        logger.warning("Login failed — bad credentials: email=%s", email)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email o contraseña incorrectos"
         )
 
-    # Successful login — reset lockout counters
-    user.failed_login_attempts = 0
-    user.locked_until = None
+    # Successful login — reset throttle counters and record activity
+    login_throttle.record_success(db, email, ip, user)
+    _record_login(user)
+    # Cuentas que verificaron su email antes de existir la vinculación
+    link_guest_orders(db, user)
     db.commit()
+    # Cuentas verificadas antes de cargar la lista de clientes históricos (o email fallido)
+    grant_legacy_benefit(db, user)
 
     logger.info("Login success: email=%s role=%s", user.email, user.role)
     token_version = getattr(user, "token_version", 0)
@@ -181,6 +215,13 @@ async def google_auth(request: Request, data: GoogleAuthRequest, db: DbSession):
     if user:
         # Link Google ID if not already linked
         if not user.google_id:
+            if user.password_hash and not user.email_verified:
+                # Nadie demostró ser dueño de este email al registrarse: quien
+                # lo hizo podría conocer la contraseña. Se anula y se cierran
+                # sus sesiones (el cliente puede crear otra con «olvidé mi contraseña»).
+                user.password_hash = None
+                user.token_version = getattr(user, "token_version", 0) + 1
+                logger.warning("Google link dropped unverified password: email=%s", user.email)
             user.google_id = google_sub
             user.email_verified = True
             db.commit()
@@ -204,16 +245,24 @@ async def google_auth(request: Request, data: GoogleAuthRequest, db: DbSession):
             lead.converted_at = datetime.now(timezone.utc)
             db.commit()
 
-        if not EmailService.send_welcome_email(user.email, user.first_name):
-            logger.error("Google welcome email failed: email=%s", user.email)
-        else:
-            logger.info("Google welcome email sent: email=%s", user.email)
+        # Cliente de la web antigua: su bienvenida especial la envía grant_legacy_benefit más abajo
+        if not find_legacy_customer(db, user.email):
+            if not EmailService.send_welcome_email(user.email, user.first_name):
+                logger.error("Google welcome email failed: email=%s", user.email)
+            else:
+                logger.info("Google welcome email sent: email=%s", user.email)
 
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cuenta desactivada"
         )
+
+    _record_login(user)
+    # Google garantiza el email verificado (se marcó arriba): vincula pedidos de invitado
+    link_guest_orders(db, user)
+    db.commit()
+    grant_legacy_benefit(db, user)
 
     token_version = getattr(user, "token_version", 0)
     access_token = create_access_token(user.id, token_version)
@@ -284,7 +333,7 @@ async def logout(current_user: CurrentUser, db: DbSession):
     """
     current_user.token_version = getattr(current_user, "token_version", 0) + 1
     db.commit()
-    return Message(message="Sesión cerrada correctamente")
+    return Message(message="Sesión cerrada")
 
 
 @router.get("/me", response_model=UserResponse)
@@ -299,7 +348,11 @@ async def forgot_password(request: Request, data: ForgotPassword, db: DbSession)
     """Request password reset email."""
     user = db.query(User).filter(User.email == data.email.lower()).first()
 
-    if user and user.is_active:
+    recent = user and db.query(PasswordResetToken.id).filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.created_at > datetime.utcnow() - timedelta(minutes=2),
+    ).first()
+    if user and user.is_active and not recent:
         token = generate_reset_token()
         expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
 
@@ -317,7 +370,7 @@ async def forgot_password(request: Request, data: ForgotPassword, db: DbSession)
             logger.info("Password reset email sent: email=%s", user.email)
 
     # Always return success to prevent email enumeration
-    return Message(message="Si el email existe, recibirás un enlace para restablecer tu contraseña")
+    return Message(message="Si ese email tiene cuenta, te enviaremos un enlace para restablecer la contraseña.")
 
 
 @router.post("/reset-password", response_model=Message)
@@ -340,6 +393,7 @@ async def reset_password(request: Request, data: ResetPassword, db: DbSession):
     user.token_version = getattr(user, "token_version", 0) + 1
     user.failed_login_attempts = 0
     user.locked_until = None
+    login_throttle.clear(db, user.email)
 
     reset_token.used = True
     db.commit()
@@ -348,7 +402,7 @@ async def reset_password(request: Request, data: ResetPassword, db: DbSession):
         logger.error("Security notification email failed: email=%s event=password_reset", user.email)
     else:
         logger.info("Security notification sent: email=%s event=password_reset", user.email)
-    return Message(message="Contraseña actualizada correctamente")
+    return Message(message="Contraseña actualizada")
 
 
 @router.post("/verify-email", response_model=Message)
@@ -366,6 +420,9 @@ async def verify_email(token: str, db: DbSession):
 
     ev_token.user.email_verified = True
     ev_token.used = True
+    # Email demostrado: ahora sí se vinculan los pedidos de invitado con ese email
+    link_guest_orders(db, ev_token.user)
     db.commit()
+    grant_legacy_benefit(db, ev_token.user)
 
-    return Message(message="Email verificado correctamente")
+    return Message(message="Email verificado")

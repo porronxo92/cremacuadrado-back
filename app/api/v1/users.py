@@ -3,9 +3,10 @@ Users API endpoints - Profile, Addresses.
 """
 import logging
 import re
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import DbSession, CurrentUser
@@ -17,6 +18,11 @@ from app.schemas.user import (
 from app.schemas.common import Message
 from app.utils.security import get_password_hash, verify_password
 from app.services.email import EmailService
+from app.services import consents
+from app.services.data_export import export_user_data
+from app.services.user_accounts import anonymize_user
+from app.services.legacy_customers import legacy_coupon_for, madrid_day
+from app.schemas.coupon import PersonalCouponResponse
 
 logger = logging.getLogger("cremacuadrado.users")
 
@@ -33,9 +39,22 @@ async def get_profile(current_user: CurrentUser):
     return current_user
 
 
+@router.get("/me/legacy-coupon", response_model=Optional[PersonalCouponResponse])
+def get_legacy_coupon(current_user: CurrentUser, db: DbSession):
+    """Cupón personal de cliente histórico (null si la cuenta no tiene)."""
+    coupon = legacy_coupon_for(db, current_user)
+    if coupon is None:
+        return None
+    return PersonalCouponResponse(
+        code=coupon.code, discount_value=coupon.discount_value, is_valid=coupon.is_valid,
+        valid_from=madrid_day(coupon.valid_from), valid_until=madrid_day(coupon.valid_until),
+    )
+
+
 @router.put("/profile", response_model=UserResponse)
 async def update_profile(
     user_data: UserUpdate,
+    request: Request,
     db: DbSession,
     current_user: CurrentUser
 ):
@@ -47,9 +66,13 @@ async def update_profile(
         current_user.last_name = user_data.last_name
     if user_data.phone is not None:
         current_user.phone = user_data.phone
-    if user_data.marketing_opt_in is not None:
+    if user_data.marketing_opt_in is not None and user_data.marketing_opt_in != current_user.marketing_opt_in:
         current_user.marketing_opt_in = user_data.marketing_opt_in
-    
+        consents.record_consent(
+            db, email=current_user.email, purpose=consents.MARKETING,
+            granted=user_data.marketing_opt_in, source="profile", request=request, user_id=current_user.id,
+        )
+
     db.commit()
     db.refresh(current_user)
     
@@ -88,34 +111,49 @@ async def change_password(
     return Message(message="Contraseña actualizada correctamente")
 
 
+@router.get("/me/export")
+async def export_my_data(db: DbSession, current_user: CurrentUser):
+    """
+    Derecho de acceso y portabilidad (RGPD arts. 15 y 20): todos los datos
+    personales de la cuenta en un JSON descargable.
+    """
+    data = export_user_data(db, current_user)
+    logger.info("User data export: user=%s", current_user.id)
+    return JSONResponse(
+        content=data,
+        headers={
+            "Content-Disposition": 'attachment; filename="mis-datos-cremacuadrado.json"',
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
 @router.delete("/me", response_model=Message)
 async def delete_account(db: DbSession, current_user: CurrentUser):
     """
     Anonymise and deactivate the current user's account (RGPD right to erasure).
     Orders are preserved for legal/fiscal records but PII is stripped.
     """
-    import uuid
-    anon_suffix = uuid.uuid4().hex[:8]
-    current_user.email = f"deleted_{anon_suffix}@cremacuadrado.invalid"
-    current_user.first_name = "Usuario"
-    current_user.last_name = "Eliminado"
-    current_user.phone = None
-    current_user.google_id = None
-    current_user.password_hash = None
-    current_user.is_active = False
-    current_user.token_version = getattr(current_user, "token_version", 0) + 1
+    anonymize_user(db, current_user)
     db.commit()
+    logger.info("User self-deleted (anonymised): user=%s", current_user.id)
     return Message(message="Cuenta eliminada correctamente")
 
 
 @router.put("/preferences", response_model=Message)
 async def update_preferences(
     marketing_opt_in: bool,
+    request: Request,
     db: DbSession,
     current_user: CurrentUser
 ):
-    """Update marketing preferences."""
-    current_user.marketing_opt_in = marketing_opt_in
+    """Update marketing preferences (queda registro del consentimiento o su retirada)."""
+    if marketing_opt_in != current_user.marketing_opt_in:
+        current_user.marketing_opt_in = marketing_opt_in
+        consents.record_consent(
+            db, email=current_user.email, purpose=consents.MARKETING,
+            granted=marketing_opt_in, source="profile", request=request, user_id=current_user.id,
+        )
     db.commit()
     
     return Message(message="Preferencias actualizadas")
