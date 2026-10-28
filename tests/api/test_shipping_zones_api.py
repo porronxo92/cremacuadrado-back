@@ -170,6 +170,22 @@ def test_pre_confirm_baleares_to_peninsula_lowers_amount(client, db, stripe_mock
     assert db.query(Order).one().total == Decimal("34.95")
 
 
+def test_pre_confirm_to_baleares_drops_free_shipping_coupon(client, db, stripe_mock):
+    from app.models.order import Coupon
+    db.add(Coupon(code="ENVIOGRATIS", discount_type="free_shipping", discount_value=Decimal("0"),
+                  min_order_amount=Decimal("0")))
+    _priced_order(db, "0", "30")
+    order = db.query(Order).one()
+    order.coupon_code = "ENVIOGRATIS"
+    db.commit()
+    assert _pre(client, "07001").status_code == 200
+    assert stripe_mock.calls == [("pi_z2", 3795)]
+    db.expire_all()
+    order = db.query(Order).one()
+    assert order.coupon_code is None
+    assert order.shipping_cost == Decimal("7.95") and order.total == Decimal("37.95")
+
+
 def test_pre_confirm_same_zone_does_not_touch_stripe(client, db, stripe_mock):
     _priced_order(db, "4.95", "34.95")
     assert _pre(client, "13005").status_code == 200

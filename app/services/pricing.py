@@ -75,6 +75,8 @@ def _inapplicable(coupon, subtotal: Decimal, for_apply: bool, zone: str = "penin
             f"Añade {format_eur(min_amount - subtotal)} más para usar el cupón "
             f"{coupon.code} (pedido mínimo {format_eur(min_amount)})."
         )
+    if coupon.discount_type == FREE_SHIPPING_TYPE and zone != "peninsula":
+        return f"El cupón {coupon.code} solo es válido para envíos a la península."
     if coupon.discount_type == FREE_SHIPPING_TYPE and _shipping_base(subtotal, zone) == 0:
         if for_apply:
             return (

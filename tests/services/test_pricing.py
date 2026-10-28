@@ -210,12 +210,26 @@ def test_baleares_shipping_has_no_free_threshold():
     assert t30.shipping_message == "Envío a Islas Baleares: 7,95 €"
 
 
-def test_baleares_free_shipping_coupon_voids_shipping(db):
+def test_free_shipping_coupon_is_peninsula_only(db):
     coupon = _coupon(db)
-    t = compute_totals(Decimal("60"), coupon, zone="baleares")
-    assert t.coupon_applies and t.shipping_discount == Decimal("7.95")
-    assert t.shipping_cost == 0 and t.total == Decimal("60")
-    assert t.shipping_message == "Envío gratis con el cupón ENVIOGRATIS"
+    for zone in ("baleares", "quote"):
+        t = compute_totals(Decimal("20"), coupon, zone=zone)
+        assert not t.coupon_applies and t.shipping_discount == 0
+        assert t.coupon_message == "El cupón ENVIOGRATIS solo es válido para envíos a la península."
+    t = compute_totals(Decimal("20"), coupon, zone="baleares")
+    assert t.shipping_cost == Decimal("7.95") and t.total == Decimal("27.95")
+    assert t.shipping_message == "Envío a Islas Baleares: 7,95 €"
+
+
+def test_validate_baleares_with_free_shipping_coupon_charges_shipping(db):
+    user, cart, _ = _cart(db, "10.00", 2)
+    _coupon(db)
+    cart.coupon_code = "ENVIOGRATIS"
+    db.commit()
+    v = asyncio.run(validate_checkout(_checkout_cp("07001"), db, user, None, None))
+    assert v.is_valid and v.shipping_zone == "baleares"
+    assert v.shipping_discount == 0 and v.shipping_cost == Decimal("7.95")
+    assert v.total == Decimal("27.95")
 
 
 def test_quote_zone_charges_no_shipping():
@@ -254,12 +268,3 @@ def test_shipping_cost_endpoint_by_postal_code(db):
     r = asyncio.run(get_shipping_cost(db, user, None, None))
     assert r.cost == Decimal("4.95") and r.shipping_zone == "peninsula"
 
-
-def test_redemption_of_free_shipping_in_baleares_records_baleares_rate(db):
-    user, cart, _ = _cart(db)
-    coupon = _coupon(db)
-    order = Order(order_number="CC-2", status="paid", user_id=user.id, subtotal=Decimal("20"),
-                  shipping_cost=Decimal("0"), discount=Decimal("0"), tax=Decimal("0"),
-                  total=Decimal("20"), coupon_code="ENVIOGRATIS",
-                  shipping_address={"postal_code": "07001"})
-    assert _redeemed_amount(order, coupon) == Decimal("7.95")
