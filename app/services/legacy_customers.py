@@ -27,7 +27,7 @@ logger = logging.getLogger("cremacuadrado.legacy_customers")
 LEGACY_DISCOUNT_PERCENT = Decimal("20")
 DEFAULT_STARTS_ON = date(2026, 10, 28)
 DEFAULT_ENDS_ON = date(2027, 10, 27)
-_CODE_PREFIX = "CLIENTE20-"
+_CODE_PREFIX = "FUNDADOR20-"
 _CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # sin 0/O ni 1/I
 _MADRID = ZoneInfo("Europe/Madrid")
 

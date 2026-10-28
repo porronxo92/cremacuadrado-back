@@ -68,21 +68,21 @@ def test_legacy_register_then_verify_grants_personal_coupon(db, client, sent):
     assert client.post(f"/api/v1/auth/verify-email?token={ev.token}").status_code == 200
 
     coupon = db.query(Coupon).one()
-    assert coupon.code.startswith("CLIENTE20-")
+    assert coupon.code.startswith("FUNDADOR20-")
     assert coupon.user_id == user.id and coupon.reusable and coupon.is_active
     assert coupon.discount_type == "percent" and coupon.discount_value == Decimal("20")
     # Periodo fijo de la promoción en hora peninsular: 28/10/2026 00:00 → 27/10/2027 23:59:59
     assert coupon.valid_from == datetime(2026, 10, 27, 23, 0)
     assert coupon.valid_until == datetime(2027, 10, 27, 21, 59, 59)
-    special = [(to, h) for to, s, h in sent if s.startswith("Tu 20%")]
+    special = [(to, h) for to, s, h in sent if s.startswith("Querido socio")]
     assert len(special) == 1
     assert special[0][0] == "ruben@example.com" and coupon.code in special[0][1]
-    assert "del 28/10/2026 al 27/10/2027" in special[0][1]
+    assert "27 de octubre de 2027" in special[0][1] and "ib00e9rico" not in special[0][1]
 
     # Logins posteriores no crean otro cupón ni reenvían el email
     grant_legacy_benefit(db, user)
     assert db.query(Coupon).count() == 1
-    assert len([s for _, s, _ in sent if s.startswith("Tu 20%")]) == 1
+    assert len([s for _, s, _ in sent if s.startswith("Querido socio")]) == 1
 
 
 def test_regular_register_keeps_normal_welcome(db, client, sent):
@@ -110,7 +110,7 @@ def test_existing_verified_account_gets_benefit_on_login(db, client, sent, monke
     r = client.post("/api/v1/auth/login", json={"email": "ana@example.com", "password": "Clave12345!"})
     assert r.status_code == 200, r.text
     assert db.query(Coupon).filter(Coupon.user_id.isnot(None)).count() == 1
-    assert any(s.startswith("Tu 20%") for _, s, _ in sent)
+    assert any(s.startswith("Querido socio") for _, s, _ in sent)
 
 
 def _paid_order(db, user, code):
@@ -125,7 +125,7 @@ def _paid_order(db, user, code):
 def test_personal_coupon_rules(db):
     owner = _user(db)
     other = _user(db, email="otro@example.com")
-    personal = Coupon(code="CLIENTE20-ABC234", discount_type="percent", discount_value=Decimal("20"),
+    personal = Coupon(code="FUNDADOR20-ABC234", discount_type="percent", discount_value=Decimal("20"),
                       user_id=owner.id, reusable=True)
     single = Coupon(code="DIEZ", discount_type="percent", discount_value=Decimal("10"))
     db.add_all([personal, single])
@@ -158,7 +158,7 @@ def test_profile_shows_only_own_legacy_coupon(db, client):
     otro = _user(db, email="otro@example.com")
     grant_legacy_benefit(db, ana)
     r = client.get("/api/v1/users/me/legacy-coupon", headers=_auth(ana))
-    assert r.status_code == 200 and r.json()["code"].startswith("CLIENTE20-")
+    assert r.status_code == 200 and r.json()["code"].startswith("FUNDADOR20-")
     assert r.json()["valid_from"] == "2026-10-28" and r.json()["valid_until"] == "2027-10-27"
     r = client.get("/api/v1/users/me/legacy-coupon", headers=_auth(otro))
     assert r.status_code == 200 and r.json() is None

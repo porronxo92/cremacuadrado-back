@@ -293,6 +293,10 @@ def _wrap_layout(inner_html: str, unsubscribe_url: Optional[str] = None) -> str:
 </html>"""
 
 
+_MONTHS_ES = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+              "agosto", "septiembre", "octubre", "noviembre", "diciembre")
+
+
 def _btn(url: str, label: str) -> str:
     return f"""<p style="text-align:center;margin:32px 0 0;">
   <a href="{escape(url)}"
@@ -590,27 +594,62 @@ class EmailService:
     @classmethod
     def send_legacy_welcome_email(cls, to_email: str, first_name: str, coupon_code: str,
                                   valid_from: datetime, valid_until: datetime) -> bool:
-        """Bienvenida de los clientes de la web antigua, con su cupón personal del 20 % (services/legacy_customers.py)."""
-        since = _madrid(valid_from).strftime("%d/%m/%Y")
-        until = _madrid(valid_until).strftime("%d/%m/%Y")
+        """Bienvenida de los clientes de la web antigua (fundadores), con su cupón personal del 20 % (services/legacy_customers.py)."""
+        until = _madrid(valid_until)
+        until_long = f"{until.day} de {_MONTHS_ES[until.month - 1]} de {until.year}"
+        until_short = until.strftime("%d/%m/%Y")
+        hello = f"Hola, {escape(first_name)}" if first_name else "Hola"
+        code = escape(coupon_code)
+        h2 = 'style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:18px;color:#7B1716;"'
+        txt = 'style="margin:0;font-family:Arial,sans-serif;font-size:16px;color:#1C1A14;line-height:1.6;"'
+        lst = 'style="margin:0;padding-left:20px;font-family:Arial,sans-serif;font-size:16px;color:#1C1A14;line-height:1.6;"'
+        wa = settings.WHATSAPP_PHONE
+        wa_display = f"{wa[2:5]} {wa[5:7]} {wa[7:9]} {wa[9:]}" if len(wa) == 11 else wa
         inner = f"""
-          <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:22px;color:#7B1716;">Gracias por seguir con nosotros, {escape(first_name or "")}</h2>
-          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-            Ya nos compraste en nuestra web anterior y queremos agradecértelo. Con tu cuenta en la nueva tienda tienes
-            un <strong>20% de descuento en todos tus pedidos durante un año</strong>, del {since} al {until}.
-          </p>
-          <div style="margin:24px 0;padding:20px;background-color:#F4F1E9;border-radius:6px;text-align:center;border:1px dashed #7B1716;">
-            <p style="margin:0 0 4px;font-family:Arial,sans-serif;font-size:12px;color:#6B6456;text-transform:uppercase;letter-spacing:1px;">Tu código personal</p>
-            <p style="margin:0;font-family:Arial,sans-serif;font-size:24px;font-weight:700;color:#7B1716;letter-spacing:3px;">{escape(coupon_code)}</p>
-            <p style="margin:8px 0 0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">Válido del {since} al {until}</p>
+          <h2 style="margin:0 0 14px;font-family:Arial,sans-serif;font-size:24px;line-height:1.25;color:#7B1716;">Estrenamos web y el precio de los tarros sube</h2>
+          <p {txt}>{hello}. Eres de las personas que probaron CremaCuadrado desde el principio y queremos darte las gracias:
+            te hemos reservado un <strong>20&nbsp;% de descuento</strong>. Con la nueva web <strong>sube el precio de los tarros de 200&nbsp;g y 100&nbsp;g</strong>,
+            y queremos contarte por qué.</p>
+
+          <h3 {h2.replace("0 0 8px", "24px 0 8px")}>Por qué sube</h3>
+          <ul {lst}>
+            <li>Desde 2024, el precio del pistacho manchego no ha parado de subir: <strong>es de calidad, sostenible y europeo, y todo el mundo lo quiere</strong>.</li>
+            <li>Cada año hemos aguantado <strong>cerca de un 20&nbsp;%</strong> de aumento.</li>
+            <li>Este año habrá <strong>poco pistacho en todo el mundo</strong> por el clima en los países que más exportan a Europa y España: <strong>Estados Unidos, Irán y Turquía</strong>.</li>
+            <li>Apostamos por lo que nos distingue, <strong>nuestra forma de hacer la crema</strong>, para que el sabor del pistacho llegue intacto al tarro y podamos <strong>seguir mejorando</strong> sin perder lo que somos.</li>
+          </ul>
+
+          <h3 {h2.replace("0 0 8px", "24px 0 8px")}>Para ti, que estás desde el principio</h3>
+          <p {txt}>Queremos que formes parte de esta etapa y que sigas comprando a los precios de siempre:</p>
+          <ul {lst}>
+            <li><strong>20&nbsp;% de descuento</strong> en los tarros de <strong>200&nbsp;g y 100&nbsp;g</strong>.</li>
+            <li><strong>Todas las veces que quieras</strong>, hasta el <strong>{until_long}</strong>.</li>
+          </ul>
+
+          <div style="margin:20px 0;padding:20px 12px;background-color:#F4F1E9;border-radius:8px;text-align:center;border:1.5px dashed #7B1716;">
+            <p style="margin:0;font-family:Arial,sans-serif;font-size:12px;color:#6B6456;text-transform:uppercase;letter-spacing:2px;">Tu código personal</p>
+            <p style="margin:6px 0;font-family:Arial,sans-serif;font-size:26px;font-weight:700;color:#7B1716;letter-spacing:3px;">{code}</p>
+            <p style="margin:0;font-family:Arial,sans-serif;font-size:13px;color:#6B6456;">Tarros de 200&nbsp;g y 100&nbsp;g · hasta el {until_short}</p>
           </div>
-          <p style="font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.6;">
-            Aplícalo en el carrito con la sesión iniciada. Solo funciona en tu cuenta, lo puedes usar en todos los pedidos que quieras y no se acumula con otros códigos.
-            También lo tienes en «Mi cuenta → Mis datos».
-          </p>
+
+          <h3 {h2}>Cómo usarlo</h3>
+          <p {txt}>Tu cuenta ya está lista. Inicia sesión con este email e introduce <strong>{code}</strong> al pagar.
+            Solo funciona en tu cuenta y no se suma a otros códigos. También lo tienes en «Mi cuenta → Mi perfil».</p>
           {_btn(site_url() + "/tienda", "Ir a la tienda")}
+
+          <div style="margin:28px 0 0;padding:16px 18px;background-color:#F4F1E9;border-radius:8px;font-family:Arial,sans-serif;font-size:15px;color:#1C1A14;line-height:1.55;">
+            <strong>Seguimos siendo dos personas, Lucas y Stefano.</strong><br>
+            Escríbenos por <a href="https://wa.me/{escape(wa)}" style="color:#7B1716;font-weight:700;">WhatsApp al {escape(wa_display)}</a> cuando quieras:
+            preguntas, ideas o lo que opines de la crema. <strong>Lo leemos nosotros</strong>, sin intermediarios.
+          </div>
+
+          <p style="margin:24px 0 0;font-family:Arial,sans-serif;font-size:16px;color:#1C1A14;line-height:1.6;">
+            <strong>Gracias por estar desde el principio. Nos da mucha energía hacer algo que gusta. Juntos vamos a por más.</strong><br><br>
+            Un abrazo,<br><strong>Lucas y Stefano</strong><br>
+            <span style="color:#6B6456;font-size:14px;">CremaCuadrado · Ciudad Real</span>
+          </p>
         """
-        return _send(to_email, "Tu 20% de cliente de siempre · CremaCuadrado", _wrap_layout(inner))
+        return _send(to_email, "Querido socio, un 20% para ti", _wrap_layout(inner))
 
     @classmethod
     def send_newsletter_confirmation_email(cls, to_email: str, confirm_url: str) -> bool:
