@@ -94,7 +94,9 @@ async def stripe_webhook(request: Request, db: DbSession):
     logger.info("Stripe event received: %s id=%s", event_type, event_id)
 
     try:
-        data: dict = event["data"]["object"]
+        # Dict del JSON ya verificado: desde stripe-python 8 el objeto del evento
+        # (StripeObject) no es un dict y `data.get(...)` lanza AttributeError.
+        data: dict = payload_dict["data"]["object"]
 
         if event_type == "payment_intent.succeeded":
             with use_site_url(_order_site_url(db, data.get("id"))):
@@ -435,8 +437,12 @@ def _handle_charge_refunded(db: Session, data: dict) -> None:
     amount_total = data.get("amount", 0)
     is_full_refund = amount_total > 0 and amount_refunded >= amount_total
 
-    # Persist each new refund object from the charge (idempotent on stripe_refund_id)
-    for stripe_refund in (data.get("refunds") or {}).get("data", []):
+    # Persist each new refund object from the charge (idempotent on stripe_refund_id).
+    # Desde la API 2022-11-15 el charge del evento ya no trae `refunds`: se piden a Stripe.
+    stripe_refunds = (data.get("refunds") or {}).get("data")
+    if not stripe_refunds and amount_refunded:
+        stripe_refunds = stripe_service.list_charge_refunds(data["id"])
+    for stripe_refund in stripe_refunds or []:
         existing = db.query(Refund).filter(Refund.stripe_refund_id == stripe_refund["id"]).first()
         if existing:
             existing.status = stripe_refund["status"]
