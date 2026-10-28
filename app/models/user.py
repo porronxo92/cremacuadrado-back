@@ -1,7 +1,7 @@
 """
 User models - Users, Addresses, Password Reset Tokens, Email Verification Tokens.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship
 
@@ -136,7 +136,9 @@ class EmailVerificationToken(Base):
 
     @property
     def is_expired(self) -> bool:
-        return datetime.utcnow() > self.expires_at
+        # En PostgreSQL la columna es TIMESTAMP WITH TIME ZONE (009) y llega con zona; en SQLite, sin ella
+        expires = self.expires_at if self.expires_at.tzinfo else self.expires_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) > expires
 
     @property
     def is_valid(self) -> bool:

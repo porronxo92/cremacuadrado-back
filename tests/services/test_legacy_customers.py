@@ -188,3 +188,11 @@ def test_admin_changes_period_for_granted_coupons(db, client):
     r = client.put("/api/v1/admin/legacy-program", headers=_auth(admin),
                    json={"starts_on": "2027-01-01", "ends_on": "2026-01-01"})
     assert r.status_code == 422
+
+
+def test_verification_token_expiry_accepts_aware_datetimes():
+    """En PostgreSQL expires_at es TIMESTAMP WITH TIME ZONE: comparar no debe lanzar TypeError."""
+    from datetime import timedelta, timezone
+    future = EmailVerificationToken(expires_at=datetime.now(timezone.utc) + timedelta(hours=1))
+    past = EmailVerificationToken(expires_at=datetime.utcnow() - timedelta(hours=1))
+    assert future.is_expired is False and past.is_expired is True
