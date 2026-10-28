@@ -745,7 +745,7 @@ class EmailService:
             <strong>Motivo:</strong> {escape(reason or "—")}<br>
             <strong>Dentro de plazo (14 días):</strong> {"Sí" if within_term else "NO, revisar"}
           </p>
-          {_btn(site_url() + "/admin/desistimientos", "Ver en el panel")}
+          {_btn(site_url() + "/admin/cumplimiento?tab=withdrawals", "Ver en el panel")}
         """
         return _send(settings.ADMIN_EMAIL, f"Desistimiento · pedido {order_number}", _wrap_layout(inner), mailbox="pedidos")
 

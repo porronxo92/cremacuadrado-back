@@ -26,3 +26,15 @@ def test_resend_payload_always_has_text(monkeypatch):
         to_email="a@example.com", order_number="CC-1", customer_name="Ana", new_status="refunded", is_guest=True)
     assert sent["html"] and sent["text"]
     assert "Reembolsado" in sent["text"]
+
+
+def test_admin_withdrawal_email_links_to_compliance_page(monkeypatch):
+    import resend
+    sent = {}
+    monkeypatch.setattr(email_service.settings, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(email_service.settings, "RESEND_API_KEY", "re_test")
+    monkeypatch.setattr(resend.Emails, "send", staticmethod(lambda params: sent.update(params)))
+    EmailService.send_admin_withdrawal("CC-1", "a@example.com", "Ana", None, None, True)
+    # /admin/desistimientos no existe: los desistimientos están en la pestaña de /admin/cumplimiento
+    assert "/admin/cumplimiento?tab=withdrawals" in sent["html"]
+    assert "/admin/desistimientos" not in sent["html"]
