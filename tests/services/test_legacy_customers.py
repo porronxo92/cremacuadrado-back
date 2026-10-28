@@ -74,7 +74,7 @@ def test_legacy_register_then_verify_grants_personal_coupon(db, client, sent):
     # Periodo fijo de la promoción en hora peninsular: 28/10/2026 00:00 → 27/10/2027 23:59:59
     assert coupon.valid_from == datetime(2026, 10, 27, 23, 0)
     assert coupon.valid_until == datetime(2027, 10, 27, 21, 59, 59)
-    special = [(to, h) for to, s, h in sent if s.startswith("Querido socio")]
+    special = [(to, h) for to, s, h in sent if s.startswith("Bienvenido a la nueva web")]
     assert len(special) == 1
     assert special[0][0] == "ruben@example.com" and coupon.code in special[0][1]
     assert "27 de octubre de 2027" in special[0][1] and "ib00e9rico" not in special[0][1]
@@ -82,7 +82,7 @@ def test_legacy_register_then_verify_grants_personal_coupon(db, client, sent):
     # Logins posteriores no crean otro cupón ni reenvían el email
     grant_legacy_benefit(db, user)
     assert db.query(Coupon).count() == 1
-    assert len([s for _, s, _ in sent if s.startswith("Querido socio")]) == 1
+    assert len([s for _, s, _ in sent if s.startswith("Bienvenido a la nueva web")]) == 1
 
 
 def test_regular_register_keeps_normal_welcome(db, client, sent):
@@ -110,7 +110,7 @@ def test_existing_verified_account_gets_benefit_on_login(db, client, sent, monke
     r = client.post("/api/v1/auth/login", json={"email": "ana@example.com", "password": "Clave12345!"})
     assert r.status_code == 200, r.text
     assert db.query(Coupon).filter(Coupon.user_id.isnot(None)).count() == 1
-    assert any(s.startswith("Querido socio") for _, s, _ in sent)
+    assert any(s.startswith("Bienvenido a la nueva web") for _, s, _ in sent)
 
 
 def _paid_order(db, user, code):
