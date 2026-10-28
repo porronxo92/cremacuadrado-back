@@ -9,8 +9,9 @@ Outgoing mail routes through one of two mailboxes (see app/config.py):
               cualquier otro email que no sea de pedidos (newsletter, contacto, B2B...)
 """
 import logging
+import re
 import smtplib
-from html import escape
+from html import escape, unescape
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -92,8 +93,24 @@ def _mailbox(kind: MailboxKind) -> _Mailbox:
 # Core send
 # ---------------------------------------------------------------------------
 
+def html_to_text(html: str) -> str:
+    """
+    Versión en texto plano de un email HTML. Los filtros de spam penalizan los
+    emails sin parte text/plain; los enlaces se conservan como «texto (url)».
+    """
+    s = re.sub(r"(?is)<(head|style|script)\b.*?</\1>", "", html)
+    s = re.sub(r'(?is)<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+               lambda m: f"{m.group(2)} ({m.group(1)})" if m.group(1).startswith("http") else m.group(2), s)
+    s = re.sub(r"(?i)<br\s*/?>|</(p|div|tr|h[1-6]|li|table)>", "\n", s)
+    s = re.sub(r"(?i)<li\b[^>]*>", "- ", s)
+    s = unescape(re.sub(r"<[^>]+>", "", s))
+    s = re.sub(r"[ \t ]+", " ", s)
+    return re.sub(r"\n\s*\n+", "\n\n", "\n".join(line.strip() for line in s.splitlines())).strip()
+
+
 def _send(to_email: str, subject: str, html: str, text: str = "", mailbox: MailboxKind = "info") -> bool:
     box = _mailbox(mailbox)
+    text = text or html_to_text(html)
 
     if not settings.EMAIL_ENABLED:
         logger.info("Email suppressed (EMAIL_ENABLED=False) mailbox=%s to=%s subject=%r", mailbox, to_email, subject)
@@ -158,6 +175,7 @@ def _send_with_attachment(
     mailbox: MailboxKind = "info",
 ) -> bool:
     box = _mailbox(mailbox)
+    text = text or html_to_text(html)
 
     if not settings.EMAIL_ENABLED:
         logger.info(

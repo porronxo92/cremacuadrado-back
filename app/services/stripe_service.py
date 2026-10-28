@@ -53,6 +53,12 @@ def create_refund(
     return s.Refund.create(**params)
 
 
+def list_charge_refunds(charge_id: str) -> list[dict]:
+    """Reembolsos de un cargo como dicts (el evento charge.refunded ya no los incluye)."""
+    s = _get_stripe()
+    return [r.to_dict() for r in s.Refund.list(charge=charge_id, limit=100).auto_paging_iter()]
+
+
 def verify_webhook_signature(payload: bytes, sig_header: str) -> stripe.Event:
     """Raises stripe.error.SignatureVerificationError if invalid."""
     if not settings.STRIPE_WEBHOOK_SECRET:
