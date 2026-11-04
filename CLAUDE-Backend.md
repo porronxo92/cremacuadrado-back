@@ -1,11 +1,11 @@
 # CLAUDE.md — Backend
-## CremaCuadrado · Ecommerce de crema de pistacho manchego artesanal
+## CremaCuadrado · Ecommerce de crema de pistacho ibérico artesanal
 
 ---
 
 ## Resumen del Proyecto
 
-CremaCuadrado es un ecommerce D2C (Direct-to-Consumer) de crema de pistacho manchego artesanal elaborada en Ciudad Real, Castilla-La Mancha. La web sirve a tres perfiles de cliente con embudos diferenciados:
+CremaCuadrado es un ecommerce D2C (Direct-to-Consumer) de crema de pistacho ibérico artesanal elaborada en Ciudad Real, Castilla-La Mancha. La web sirve a tres perfiles de cliente con embudos diferenciados:
 
 - **B2C** — consumidor final que compra online
 - **B2B Punto de venta** — tiendas gourmet y delicatessen que revenden el producto
@@ -364,7 +364,7 @@ El webhook `POST /webhooks/stripe` al recibir `payment_intent.succeeded` debe:
 - ❌ Nunca almacenar datos de tarjeta. Stripe lo gestiona.
 
 ### Negocio
-- ❌ No decir "pistacho manchego certificado" — el origen es principalmente manchego pero no está certificado oficialmente.
+- ❌ No decir "pistacho ibérico certificado" — el origen es principalmente manchego pero no está certificado oficialmente.
 - ❌ No decir "hecha a mano" — se usa maquinaria (molino eléctrico, repeladora mecánica).
 - ❌ No prometer "consistencia lote a lote" — es un producto artesanal con variaciones naturales.
 - ❌ No mostrar el precio mayorista B2B en páginas públicas — se comunica por teléfono.

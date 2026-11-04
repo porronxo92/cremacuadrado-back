@@ -274,7 +274,7 @@ def _wrap_layout(inner_html: str, unsubscribe_url: Optional[str] = None) -> str:
           <!-- HEADER -->
           <tr>
             <td style="background-color:#7B1716;padding:32px 40px;text-align:center;border-radius:8px 8px 0 0;">
-              <p style="margin:0;font-family:Arial,sans-serif;font-size:11px;letter-spacing:4px;text-transform:uppercase;color:#E6C15A;">crema de pistacho manchego</p>
+              <p style="margin:0;font-family:Arial,sans-serif;font-size:11px;letter-spacing:4px;text-transform:uppercase;color:#E6C15A;">crema de pistacho ibérico</p>
               <h1 style="margin:8px 0 0;font-family:Arial,sans-serif;font-size:28px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#F4F1E9;">CREMACUADRADO</h1>
             </td>
           </tr>
@@ -290,7 +290,7 @@ def _wrap_layout(inner_html: str, unsubscribe_url: Optional[str] = None) -> str:
           <tr>
             <td style="background-color:#1C1A14;padding:24px 40px;border-radius:0 0 8px 8px;text-align:center;">
               <p style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:12px;color:#6B6456;">
-                CremaCuadrado · Crema de pistacho manchego artesanal
+                CremaCuadrado · Crema de pistacho ibérico artesanal
               </p>
               <p style="margin:0;font-family:Arial,sans-serif;font-size:11px;color:#4a453d;">
                 <a href="{site_url()}/privacidad" style="color:#6B6456;text-decoration:none;">Privacidad</a>

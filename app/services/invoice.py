@@ -165,7 +165,7 @@ def render_invoice_pdf(invoice) -> bytes:
     logo_h = 17 * mm
     brand_block = Table(
         [[_logo(logo_h), [Paragraph("CREMACUADRADO", brand),
-                          Paragraph("Crema de pistacho manchego artesanal", tagline)]]],
+                          Paragraph("Crema de pistacho ibérico artesanal", tagline)]]],
         colWidths=[logo_h * _LOGO_W / _LOGO_H + 4 * mm, None],
         style=TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
