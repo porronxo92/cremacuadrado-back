@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     
     # Legal — versión vigente de los textos. Se guarda con cada aceptación /
     # consentimiento; súbela cuando cambie el texto publicado en el frontend.
-    TERMS_VERSION: str = "2026-10c"    # condiciones generales de venta
+    TERMS_VERSION: str = "2026-11a"    # condiciones generales de venta
     PRIVACY_VERSION: str = "2026-10b"  # política de privacidad
 
     # Envíos: península (SHIPPING_COST, gratis desde el umbral) y Baleares (tarifa fija,
@@ -119,7 +119,7 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str  # Required — set via .env, never hardcode
 
     # B2B — where /para-tiendas and /para-restaurantes lead notifications land
-    B2B_NOTIFICATION_EMAIL: str = "b2b@cremacuadrado.com"
+    B2B_NOTIFICATION_EMAIL: str = "info@cremacuadrado.com"
 
     # Base URL for legacy /static/ image paths (leave empty in production — use BLOB_BASE_URL instead)
     BASE_URL: str = ""
