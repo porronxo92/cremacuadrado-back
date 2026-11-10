@@ -203,3 +203,15 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+def trusted_hosts(allowed: list[str], vercel_url: str = "", vercel_branch_url: str = "") -> list[str]:
+    """ALLOWED_HOSTS más la URL de este despliegue.
+
+    Vercel Cron llama a la URL única del despliegue (…-<hash>-<equipo>.vercel.app),
+    que cambia en cada deploy y no puede ir fija en ALLOWED_HOSTS. VERCEL_URL la
+    inyecta Vercel en cada despliegue. Con "*" se permite todo y no se añade nada.
+    """
+    if "*" in allowed:
+        return allowed
+    return allowed + [h for h in (vercel_url, vercel_branch_url) if h and h not in allowed]
