@@ -22,7 +22,7 @@ from slowapi import _rate_limit_exceeded_handler
 from starlette.middleware.sessions import SessionMiddleware
 from sqladmin import Admin
 
-from app.config import settings
+from app.config import settings, trusted_hosts
 from app.logging_config import setup_logging, request_id_ctx
 from app.limiter import limiter
 from app.services import blob_service
@@ -152,7 +152,12 @@ _sqladmin.add_view(PointOfSaleAdmin)
 # Trusted Host middleware — prevents Host header injection
 # In production set ALLOWED_HOSTS=["cremacuadrado-back.vercel.app"] in env vars
 if settings.ALLOWED_HOSTS != ["*"]:
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=trusted_hosts(
+            settings.ALLOWED_HOSTS, os.environ.get("VERCEL_URL", ""), os.environ.get("VERCEL_BRANCH_URL", ""),
+        ),
+    )
 
 # CORS Middleware — origins come from settings, never hardcoded here
 app.add_middleware(
