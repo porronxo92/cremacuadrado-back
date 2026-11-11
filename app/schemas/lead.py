@@ -8,6 +8,8 @@ class NewsletterSubscribeRequest(BaseModel):
     email: EmailStr
     consent: bool = False  # casilla de comunicaciones comerciales (sin premarcar)
     source: Optional[str] = Field(None, max_length=50)
+    website: str = Field("", max_length=255)  # honeypot (services/antispam.py)
+    turnstile_token: str = Field("", max_length=4096)
 
 
 class NewsletterTokenRequest(BaseModel):
@@ -23,6 +25,8 @@ class PosLeadRequest(BaseModel):
     email: EmailStr
     phone: str = Field(..., min_length=1, max_length=30)
     accept_privacy: bool = False  # información de privacidad leída (obligatoria)
+    website: str = Field("", max_length=255)  # honeypot (services/antispam.py)
+    turnstile_token: str = Field("", max_length=4096)
 
 
 class ContactFormRequest(BaseModel):
@@ -32,3 +36,5 @@ class ContactFormRequest(BaseModel):
     message: str = Field(..., min_length=10, max_length=5000)
     accepts_marketing: bool = False
     accept_privacy: bool = False  # información de privacidad leída (obligatoria)
+    website: str = Field("", max_length=255)  # honeypot (services/antispam.py)
+    turnstile_token: str = Field("", max_length=4096)

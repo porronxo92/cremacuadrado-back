@@ -16,7 +16,7 @@ from app.api.deps import DbSession
 from app.limiter import limiter
 from app.models.compliance import WithdrawalRequest
 from app.models.order import Order
-from app.services import consents
+from app.services import antispam, consents
 from app.services.email import EmailService
 
 logger = logging.getLogger("cremacuadrado.withdrawals")
@@ -33,6 +33,8 @@ class WithdrawalCreate(BaseModel):
     full_name: str = Field(..., min_length=2, max_length=255)
     items_text: str | None = Field(None, max_length=2000)  # vacío = pedido completo
     reason: str | None = Field(None, max_length=2000)      # opcional
+    website: str = Field("", max_length=255)  # honeypot (services/antispam.py)
+    turnstile_token: str = Field("", max_length=4096)
 
 
 class WithdrawalReceipt(BaseModel):
@@ -56,8 +58,12 @@ def _within_term(order: Order, now: datetime) -> bool:
 @router.post("", response_model=WithdrawalReceipt, status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
 async def request_withdrawal(request: Request, data: WithdrawalCreate, db: DbSession):
+    # Honeypot relleno: mismo 404 que un pedido inexistente (no hay acuse falso que devolver)
+    bot = antispam.honeypot_hit(data.website, "withdrawal")
+    if not bot:
+        await antispam.require_human(data.turnstile_token, request)
     email = data.email.lower().strip()
-    order = db.query(Order).filter(Order.order_number == data.order_number.strip().upper()).first()
+    order = None if bot else db.query(Order).filter(Order.order_number == data.order_number.strip().upper()).first()
     # Mismo error si no existe o el email no coincide: no revela pedidos ajenos
     if not order or (order.customer_email or "").lower() != email:
         raise HTTPException(
