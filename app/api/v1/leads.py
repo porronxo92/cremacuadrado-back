@@ -12,7 +12,7 @@ from app.limiter import limiter
 from app.models.pos_lead import PosLead
 from app.schemas.lead import PosLeadRequest
 from app.schemas.common import Message
-from app.services import consents
+from app.services import antispam, consents
 from app.services.email import EmailService
 
 logger = logging.getLogger("cremacuadrado.leads")
@@ -24,9 +24,13 @@ router = APIRouter()
 @limiter.limit("5/minute")
 async def create_pos_lead(request: Request, data: PosLeadRequest, db: DbSession):
     """Capture a lead from the /para-tiendas B2B form and notify both parties."""
+    ok = Message(message="Solicitud recibida. Te contactamos en 48 horas.")
+    if antispam.honeypot_hit(data.website, "pos_lead"):
+        return ok  # éxito falso: el bot no sabe que se ha descartado
     if not data.accept_privacy:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Debes aceptar la información de privacidad")
+    await antispam.require_human(data.turnstile_token, request)
     email = data.email.lower()
 
     recently_acked = db.query(PosLead.id).filter(
@@ -64,4 +68,4 @@ async def create_pos_lead(request: Request, data: PosLeadRequest, db: DbSession)
         logger.error("POS lead admin notification failed: email=%s", email)
 
     logger.info("POS lead captured: email=%s establishment=%s", email, data.establishment_name)
-    return Message(message="Solicitud recibida. Te contactamos en 48 horas.")
+    return ok

@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     # Vercel Cron — Vercel envía "Authorization: Bearer <CRON_SECRET>"
     CRON_SECRET: str = ""
 
+    # Cloudflare Turnstile (antispam del formulario de contacto). Vacío = sin comprobar
+    # (local). Si se rellena, el frontend debe llevar el turnstileSiteKey de la misma clave.
+    TURNSTILE_SECRET_KEY: str = ""
+
     # Pagination
     DEFAULT_PAGE_SIZE: int = 12
     MAX_PAGE_SIZE: int = 100

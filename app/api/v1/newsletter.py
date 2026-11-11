@@ -21,7 +21,7 @@ from app.models.order import Coupon
 from app.models.user import User
 from app.schemas.common import Message
 from app.schemas.lead import NewsletterSubscribeRequest, NewsletterTokenRequest
-from app.services import consents
+from app.services import antispam, consents
 from app.services.email import EmailService
 from app.utils.site import site_url
 
@@ -45,11 +45,14 @@ def unsubscribe_url(lead: NewsletterLead) -> str:
 @limiter.limit("5/minute")
 async def subscribe(request: Request, data: NewsletterSubscribeRequest, db: DbSession):
     """Alta pendiente de confirmar (doble opt-in)."""
+    if antispam.honeypot_hit(data.website, "newsletter"):
+        return Message(message=_GENERIC_OK)
     if not data.consent:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Debes aceptar recibir comunicaciones comerciales para suscribirte",
         )
+    await antispam.require_human(data.turnstile_token, request)
     email = data.email.lower().strip()
     lead = db.query(NewsletterLead).filter(NewsletterLead.email == email).first()
 

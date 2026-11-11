@@ -158,6 +158,50 @@ def test_contact_form_acks_sender_once_per_window(client, outbox):
     assert len(to_victim) == 1
 
 
+def test_contact_form_honeypot_discards_silently(client, outbox, db):
+    from app.models.contact_lead import ContactLead
+    body = {"name": "xKqzPw", "email": "bot@example.com", "message": "asdkjh qwe zxcmnb",
+            "accept_privacy": True, "accepts_marketing": True, "website": "http://spam.example"}
+    assert client.post("/api/v1/contact/submit", json=body).status_code == 201
+    assert outbox == []
+    assert db.query(ContactLead).count() == 0
+
+
+_PUBLIC_FORMS = [
+    ("/api/v1/contact/submit", {"name": "Ana", "email": "ana@example.com",
+                                "message": "Mensaje de prueba largo", "accept_privacy": True}, 201),
+    ("/api/v1/newsletter/subscribe", {"email": "ana@example.com", "consent": True}, 201),
+    ("/api/v1/leads/punto-de-venta", {"name": "Ana", "establishment_name": "Tienda", "city": "Madrid",
+                                      "establishment_type": "gourmet", "email": "ana@example.com",
+                                      "phone": "600000000", "accept_privacy": True}, 201),
+    # sin pedido: si pasa la comprobación llega a la búsqueda y da 404
+    ("/api/v1/withdrawals", {"order_number": "CC-000000", "email": "ana@example.com",
+                             "full_name": "Ana Pérez"}, 404),
+]
+
+
+@pytest.mark.parametrize("url,body,passed_status", _PUBLIC_FORMS)
+def test_public_forms_require_turnstile_when_configured(client, outbox, monkeypatch, url, body, passed_status):
+    from app.services import antispam
+    monkeypatch.setattr(antispam.settings, "TURNSTILE_SECRET_KEY", "secret")
+    seen = []
+
+    async def fake_verify(token, ip):
+        seen.append(token)
+        return token == "good"
+    monkeypatch.setattr(antispam, "turnstile_ok", fake_verify)
+    assert client.post(url, json=body | {"turnstile_token": "bad"}).status_code == 400
+    assert outbox == []
+    assert client.post(url, json=body | {"turnstile_token": "good"}).status_code == passed_status
+    assert seen == ["bad", "good"]
+
+
+@pytest.mark.parametrize("url,body,_", _PUBLIC_FORMS)
+def test_public_forms_honeypot_sends_nothing(client, outbox, url, body, _):
+    client.post(url, json=body | {"website": "http://spam.example"})
+    assert outbox == []
+
+
 def test_admin_panel_login_uses_pair_throttle(db, monkeypatch):
     import asyncio
     from starlette.requests import Request
